@@ -5,7 +5,17 @@ PRODUCT = {
     "brand": "Pop Mart",
     "name": "Labubu Exciting Macaron Blind Box",
     "character": "Labubu",
-    "product_url": "https://www.popmart.com/us/products/labubu-exciting-macaron",
+    "retailer": "toytokyo.com",  # a real store domain
+    "product_url": "https://toytokyo.com/products/pop-mart-labubu-exciting-macaron",
+}
+
+# A demo/seed product whose stored URL is a placeholder (retailer is a name, not a domain).
+DEMO_PRODUCT = {
+    "brand": "Pop Mart",
+    "name": "Labubu Big Into Energy",
+    "character": "Labubu",
+    "retailer": "Pop Mart US",
+    "product_url": "https://www.popmart.com/us/products/placeholder",
 }
 
 
@@ -25,10 +35,18 @@ def test_ebay_url_includes_campaign_when_set(monkeypatch):
     assert "campid=5338999999" in url
 
 
-def test_popmart_target_uses_product_url():
+def test_popmart_real_store_uses_product_url():
     settings = get_settings()
     url = build_url(settings, PRODUCT, "popmart")
-    assert url.startswith("https://www.popmart.com/us/products/labubu-exciting-macaron")
+    assert url.startswith("https://toytokyo.com/products/pop-mart-labubu-exciting-macaron")
+
+
+def test_popmart_demo_falls_back_to_search():
+    # Placeholder URL -> a working Pop Mart search, never a dead product page.
+    settings = get_settings()
+    url = build_url(settings, DEMO_PRODUCT, "popmart")
+    assert url.startswith("https://www.popmart.com/us/search/")
+    assert "Labubu" in url
 
 
 def test_stockx_target_is_search():

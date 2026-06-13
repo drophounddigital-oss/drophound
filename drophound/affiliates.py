@@ -39,10 +39,19 @@ def build_url(settings: Settings, product: Any, target: str) -> str:
     search_term = f"{brand} {name}".strip()
 
     if target == "popmart":
-        url = _field(product, "product_url") or "https://www.popmart.com/us"
-        if settings.popmart_affiliate_ref:
-            return _add_params(url, {"ref": settings.popmart_affiliate_ref})
-        return url
+        retailer = _field(product, "retailer") or ""
+        url = (_field(product, "product_url") or "").strip()
+        # A real store product page: the retailer is an actual domain we scraped a
+        # live URL from (e.g. strangecattoys.com). Link straight to it.
+        if "." in retailer and url:
+            if settings.popmart_affiliate_ref:
+                return _add_params(url, {"ref": settings.popmart_affiliate_ref})
+            return url
+        # Otherwise the stored URL is a demo placeholder — send the user to a
+        # search that actually resolves instead of a dead product page.
+        if "pop mart" in brand.lower() or "popmart" in brand.lower():
+            return f"https://www.popmart.com/us/search/{quote_plus(name)}"
+        return f"https://www.google.com/search?q={quote_plus('buy ' + search_term)}"
 
     if target == "stockx":
         url = f"https://stockx.com/search?s={quote_plus(search_term)}"
