@@ -1,24 +1,29 @@
 name: Keep alive
 
-# Pings the live site so the free Render instance doesn't sleep (15-min idle timeout),
-# so crawlers and visitors never hit a cold start. GitHub cron is best-effort timing.
+# Keeps the free Render instance warm so visitors/crawlers don't hit a cold start.
+# GitHub's scheduled timing is unreliable, so each run pings every 60s for ~55 min —
+# one trigger covers nearly an hour, and cancel-in-progress restarts the clock on
+# each new trigger. (Public-repo Actions minutes are free/unlimited.)
 on:
   schedule:
-    - cron: "*/10 * * * *"   # every ~10 minutes
-  workflow_dispatch: {}       # also runnable manually from the Actions tab
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: true
 
 jobs:
   ping:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
-      - name: Ping health endpoint
+      - name: Keep the site warm
         run: |
-          for i in 1 2 3; do
+          end=$(( $(date +%s) + 3300 ))   # run for ~55 minutes
+          while [ "$(date +%s)" -lt "$end" ]; do
             code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 \
-              https://drophound-xyy4.onrender.com/api/health) || code=000
-            echo "attempt $i -> HTTP $code"
-            [ "$code" = "200" ] && exit 0
-            sleep 15
+              https://drophound-xyy4.onrender.com/api/health || echo 000)
+            echo "$(date -u +%H:%M:%S) ping -> $code"
+            sleep 60
           done
-          echo "site did not respond 200 after retries"
-          exit 1
