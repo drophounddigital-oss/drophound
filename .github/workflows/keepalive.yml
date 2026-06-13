@@ -1,0 +1,24 @@
+name: Keep alive
+
+# Pings the live site so the free Render instance doesn't sleep (15-min idle timeout),
+# so crawlers and visitors never hit a cold start. GitHub cron is best-effort timing.
+on:
+  schedule:
+    - cron: "*/10 * * * *"   # every ~10 minutes
+  workflow_dispatch: {}       # also runnable manually from the Actions tab
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping health endpoint
+        run: |
+          for i in 1 2 3; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 90 \
+              https://drophound-xyy4.onrender.com/api/health) || code=000
+            echo "attempt $i -> HTTP $code"
+            [ "$code" = "200" ] && exit 0
+            sleep 15
+          done
+          echo "site did not respond 200 after retries"
+          exit 1
