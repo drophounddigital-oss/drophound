@@ -124,3 +124,24 @@ def test_watch_add_list_remove(client, conn):
 
 def test_watch_requires_valid_email(client):
     assert client.post("/watch/add", data={"email": "nope", "product_id": "1"}).status_code == 400
+
+
+def test_robots_txt(client):
+    r = client.get("/robots.txt")
+    assert r.status_code == 200
+    assert "User-agent: *" in r.text and "Sitemap:" in r.text
+
+
+def test_sitemap_xml(client):
+    r = client.get("/sitemap.xml")
+    assert r.status_code == 200
+    assert "<urlset" in r.text and "/watch" in r.text
+
+
+def test_seo_meta_on_homepage(client):
+    t = client.get("/").text
+    assert 'property="og:image"' in t
+    assert 'rel="canonical"' in t
+    assert "application/ld+json" in t
+    assert 'name="twitter:card"' in t
+    assert "&amp;amp;" not in t  # title not double-escaped

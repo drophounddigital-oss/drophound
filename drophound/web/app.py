@@ -19,7 +19,7 @@ from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import Request
-from starlette.responses import JSONResponse, RedirectResponse
+from starlette.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response
 from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
@@ -185,6 +185,7 @@ def md_lite(text: str) -> str:
 def site_context(conn: sqlite3.Connection) -> dict:
     s = get_settings()
     return {
+        "base_url": s.base_url.rstrip("/"),
         "premium_price": s.premium_price,
         "tracked": db.one(conn, "SELECT COUNT(*) c FROM products")["c"],
         "alerts_24h": db.one(
@@ -442,6 +443,40 @@ async def hook_restock(request: Request):
         conn.close()
 
 
+# ---- SEO: robots + sitemap ------------------------------------------------ #
+async def robots_txt(request: Request):
+    base = get_settings().base_url.rstrip("/")
+    body = (
+        "User-agent: *\n"
+        "Allow: /\n"
+        "Disallow: /api/\n"
+        "Disallow: /go/\n"
+        "Disallow: /hook\n"
+        "Disallow: /watch/add\n"
+        "Disallow: /watch/remove\n"
+        "Disallow: /subscribe\n"
+        "Disallow: /upgrade\n"
+        f"Sitemap: {base}/sitemap.xml\n"
+    )
+    return PlainTextResponse(body)
+
+
+async def sitemap_xml(request: Request):
+    base = get_settings().base_url.rstrip("/")
+    pages = [("/", "hourly", "1.0"), ("/watch", "hourly", "0.9"),
+             ("/drops", "hourly", "0.8"), ("/pricing", "weekly", "0.6"),
+             ("/digest", "daily", "0.5")]
+    urls = "".join(
+        f"<url><loc>{base}{p}</loc><changefreq>{cf}</changefreq>"
+        f"<priority>{pr}</priority></url>"
+        for p, cf, pr in pages
+    )
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>'
+           '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+           f"{urls}</urlset>")
+    return Response(xml, media_type="application/xml")
+
+
 # ---- JSON API ------------------------------------------------------------- #
 async def api_health(request: Request):
     return JSONResponse({"status": "ok", "service": "drophound"})
@@ -667,6 +702,8 @@ routes = [
     Route("/upgrade", upgrade, methods=["POST"]),
     Route("/digest", digest_page),
     Route("/go/{product_id:int}", go_redirect),
+    Route("/robots.txt", robots_txt),
+    Route("/sitemap.xml", sitemap_xml),
     Route("/hook/restock", hook_restock, methods=["POST"]),
     Route("/api/health", api_health),
     Route("/api/drops", api_drops),
