@@ -37,7 +37,15 @@ def _recent_events(conn: sqlite3.Connection, hours: int) -> list[sqlite3.Row]:
 
 def _top_movers(conn: sqlite3.Connection, limit: int = 3) -> list[dict]:
     movers = []
-    for p in db.q(conn, "SELECT * FROM products"):
+    # Only products that actually have >=2 resale snapshots can have a trend —
+    # avoids scanning the entire catalog.
+    candidates = db.q(
+        conn,
+        """SELECT p.* FROM products p
+           WHERE p.id IN (SELECT product_id FROM resale_prices
+                          GROUP BY product_id HAVING COUNT(*) >= 2)""",
+    )
+    for p in candidates:
         cur = resale.latest(conn, p["id"])
         prev = resale.previous(conn, p["id"])
         if not cur or not prev or cur["median"] is None or prev["median"] is None:
@@ -58,7 +66,15 @@ def _top_movers(conn: sqlite3.Connection, limit: int = 3) -> list[dict]:
 
 def _upcoming(conn: sqlite3.Connection, limit: int = 4) -> list[dict]:
     out = []
-    for p in db.q(conn, "SELECT * FROM products"):
+    # Only products with >=2 drop/restock events can be predicted — skip the rest.
+    candidates = db.q(
+        conn,
+        """SELECT p.* FROM products p
+           WHERE p.id IN (SELECT product_id FROM restock_events
+                          WHERE event_type IN ('drop','restock')
+                          GROUP BY product_id HAVING COUNT(*) >= 2)""",
+    )
+    for p in candidates:
         events = db.q(
             conn,
             "SELECT event_type, detected_at FROM restock_events WHERE product_id=?",

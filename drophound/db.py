@@ -40,6 +40,8 @@ CREATE TABLE IF NOT EXISTS restock_events (
 );
 CREATE INDEX IF NOT EXISTS idx_events_product ON restock_events(product_id);
 CREATE INDEX IF NOT EXISTS idx_events_time ON restock_events(detected_at);
+CREATE INDEX IF NOT EXISTS idx_events_product_time ON restock_events(product_id, detected_at);
+CREATE INDEX IF NOT EXISTS idx_events_type ON restock_events(event_type);
 
 CREATE TABLE IF NOT EXISTS resale_prices (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -54,6 +56,7 @@ CREATE TABLE IF NOT EXISTS resale_prices (
     captured_at  TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_resale_product ON resale_prices(product_id);
+CREATE INDEX IF NOT EXISTS idx_resale_product_time ON resale_prices(product_id, captured_at);
 
 CREATE TABLE IF NOT EXISTS subscribers (
     id                INTEGER PRIMARY KEY AUTOINCREMENT,

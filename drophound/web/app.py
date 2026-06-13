@@ -16,6 +16,8 @@ from contextlib import asynccontextmanager
 from datetime import timedelta
 
 from starlette.applications import Starlette
+from starlette.middleware import Middleware
+from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, RedirectResponse
 from starlette.routing import Mount, Route
@@ -673,4 +675,8 @@ routes = [
     Mount("/static", app=StaticFiles(directory=str(STATIC_DIR)), name="static"),
 ]
 
-app = Starlette(routes=routes, lifespan=lifespan)
+app = Starlette(
+    routes=routes,
+    lifespan=lifespan,
+    middleware=[Middleware(GZipMiddleware, minimum_size=600)],
+)
