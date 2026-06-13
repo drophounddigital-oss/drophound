@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Welcome to Premium — DropHound{% endblock %}
+{% block description %}Your DropHound Premium subscription is active.{% endblock %}
+{% block content %}
+
+<div class="success-wrap">
+  <div class="card success-card">
+    <div class="success-mark">✓</div>
+    <h1>You're Premium.</h1>
+    <p class="muted">Payment received — your subscription is active. You now get faster,
+      filtered alerts, eBay resale tracking, your collection's live value, and restock
+      predictions.</p>
+    <div class="success-actions">
+      <a class="btn" href="/app">Go to your dashboard</a>
+      <a class="btn btn-ghost" href="/watch">Pick what to watch</a>
+    </div>
+    <p class="micro center">A receipt is on its way to your email. Manage or cancel anytime.</p>
+  </div>
+</div>
+
+{% endblock %}

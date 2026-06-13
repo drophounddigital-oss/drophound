@@ -24,7 +24,7 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
-from .. import affiliates, db, filters
+from .. import affiliates, billing, db, filters
 from ..config import STATIC_DIR, TEMPLATES_DIR, get_settings
 from ..engine import digest as digest_mod
 from ..engine import pipeline
@@ -300,7 +300,9 @@ async def pricing(request: Request):
         return templates.TemplateResponse(
             request, "pricing.html",
             {"site": site_context(conn),
-             "upgraded": request.query_params.get("upgraded") == "1"},
+             "stripe_enabled": get_settings().has_stripe,
+             "upgraded": request.query_params.get("upgraded") == "1",
+             "error": request.query_params.get("error") == "1"},
         )
     finally:
         conn.close()
@@ -310,19 +312,71 @@ async def upgrade(request: Request):
     form = await request.form()
     email = (form.get("email") or DEMO_EMAIL).strip().lower()
     settings = get_settings()
+
+    # Real payments: hand the buyer to Stripe's hosted checkout.
+    if settings.has_stripe and "@" in email:
+        try:
+            url, _ = billing.create_checkout_session(settings, email)
+            if url:
+                return RedirectResponse(url, status_code=303)
+        except Exception:
+            pass
+        return RedirectResponse("/pricing?error=1", status_code=303)
+
+    # No Stripe configured -> demo flip so the flow is still walkable.
     conn = open_conn()
     try:
-        sub = get_subscriber(conn, email)
+        sub = get_or_create_subscriber(conn, email)
         if sub:
-            # NOTE: production path -> create a Stripe Checkout Session here using
-            # settings.stripe_secret_key / settings.stripe_price_id and redirect to it.
-            # This dry-run flips the tier locally so the flow is demonstrable.
             db.execute(
                 conn,
                 "UPDATE subscribers SET tier='premium', premium_since=? WHERE id=?",
                 (now_utc().isoformat(), sub["id"]),
             )
         return RedirectResponse("/pricing?upgraded=1", status_code=303)
+    finally:
+        conn.close()
+
+
+async def upgrade_success(request: Request):
+    conn = open_conn()
+    try:
+        return templates.TemplateResponse(
+            request, "upgrade_success.html", {"site": site_context(conn)})
+    finally:
+        conn.close()
+
+
+async def stripe_webhook(request: Request):
+    settings = get_settings()
+    payload = await request.body()
+    event = billing.verify_webhook(
+        payload, request.headers.get("stripe-signature", ""),
+        settings.stripe_webhook_secret or "")
+    if event is None:
+        return JSONResponse({"error": "invalid signature"}, status_code=400)
+
+    etype = event.get("type")
+    obj = (event.get("data") or {}).get("object") or {}
+    conn = open_conn()
+    try:
+        if etype == "checkout.session.completed":
+            email = (obj.get("client_reference_id") or obj.get("customer_email") or "").lower()
+            if email and "@" in email:
+                sub = get_or_create_subscriber(conn, email)
+                if sub:
+                    db.execute(
+                        conn,
+                        """UPDATE subscribers SET tier='premium', premium_since=?,
+                           stripe_customer_id=? WHERE id=?""",
+                        (now_utc().isoformat(), obj.get("customer"), sub["id"]),
+                    )
+        elif etype == "customer.subscription.deleted":
+            customer = obj.get("customer")
+            if customer:
+                db.execute(conn, "UPDATE subscribers SET tier='free' WHERE stripe_customer_id=?",
+                           (customer,))
+        return JSONResponse({"received": True})
     finally:
         conn.close()
 
@@ -700,6 +754,8 @@ routes = [
     Route("/collection", collection_page),
     Route("/pricing", pricing),
     Route("/upgrade", upgrade, methods=["POST"]),
+    Route("/upgrade/success", upgrade_success),
+    Route("/stripe/webhook", stripe_webhook, methods=["POST"]),
     Route("/digest", digest_page),
     Route("/go/{product_id:int}", go_redirect),
     Route("/robots.txt", robots_txt),

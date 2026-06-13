@@ -72,6 +72,7 @@ class Settings:
     # Billing + AI
     stripe_secret_key: str | None
     stripe_price_id: str | None
+    stripe_webhook_secret: str | None
     anthropic_api_key: str | None
 
     # Shared secret protecting the inbound /hook/restock webhook
@@ -108,6 +109,7 @@ def get_settings() -> Settings:
         stockx_affiliate_ref=_get("STOCKX_AFFILIATE_REF"),
         stripe_secret_key=_get("STRIPE_SECRET_KEY"),
         stripe_price_id=_get("STRIPE_PRICE_ID"),
+        stripe_webhook_secret=_get("STRIPE_WEBHOOK_SECRET"),
         anthropic_api_key=_get("ANTHROPIC_API_KEY"),
         hook_secret=_get("DROPHOUND_HOOK_SECRET"),
     )

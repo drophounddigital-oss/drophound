@@ -69,7 +69,8 @@ CREATE TABLE IF NOT EXISTS subscribers (
     filter_regions    TEXT,
     price_ceiling     REAL,
     created_at        TEXT NOT NULL,
-    premium_since     TEXT
+    premium_since     TEXT,
+    stripe_customer_id TEXT
 );
 
 CREATE TABLE IF NOT EXISTS collection_items (
@@ -139,8 +140,16 @@ def connect(db_path: Path | str) -> sqlite3.Connection:
     return conn
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, decl: str) -> None:
+    cols = [r["name"] for r in conn.execute(f"PRAGMA table_info({table})")]
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+
+
 def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    # Lightweight migrations so an already-deployed DB picks up new columns.
+    _ensure_column(conn, "subscribers", "stripe_customer_id", "TEXT")
     conn.commit()
 
 
