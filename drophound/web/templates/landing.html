@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block content %}
+
+{% if subscribed %}
+<div class="banner banner-ok">You're on the list. Watch your inbox — and grab faster, filtered alerts on <a href="/pricing">Premium</a>.</div>
+{% endif %}
+{% if error %}
+<div class="banner banner-err">That email didn't look right. Mind trying again?</div>
+{% endif %}
+
+<section class="hero">
+  <div class="hero-copy">
+    <span class="pill">● Live — {{ site.alerts_24h }} alerts in the last 24h</span>
+    <h1>Never miss a drop again.</h1>
+    <p class="lede">
+      Real-time restock alerts and resale intelligence for blind-box collectors.
+      Labubu, Molly, Skullpanda, Crybaby, Sonny Angel, Smiski — the second they
+      drop or restock, you know. Before they sell out.
+    </p>
+
+    <form id="join" class="join" action="/subscribe" method="post">
+      <input type="email" name="email" placeholder="you@email.com" required aria-label="Email" />
+      <input type="text" name="telegram" placeholder="@telegram (optional)" aria-label="Telegram handle" />
+      <button class="btn" type="submit">Get free alerts</button>
+    </form>
+    <p class="micro">Free forever. Telegram + Discord + email. No spam, just drops.</p>
+
+    <div class="stats">
+      <div><strong>{{ site.tracked }}</strong><span>products tracked</span></div>
+      <div><strong>{{ site.alerts_24h }}</strong><span>alerts / 24h</span></div>
+      <div><strong>{{ site.subscribers }}</strong><span>collectors</span></div>
+    </div>
+  </div>
+
+  <aside class="hero-feed card">
+    <div class="card-head">
+      <h3>Latest drops</h3><a class="link" href="/drops">See all →</a>
+    </div>
+    {% if drops %}
+    <ul class="feed mini">
+      {% for d in drops %}
+      <li>
+        <span class="thumb" style="background:{{ d.color }}">{{ d.initials }}</span>
+        <span class="feed-main">
+          <span class="feed-title">{{ d.name }}</span>
+          <span class="feed-sub">{{ d.retailer }} · {{ d.region }} · {{ d.age }}</span>
+        </span>
+        <span class="badge {{ d.badge_class }}">{{ d.badge }}</span>
+      </li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="empty">No drops yet — run the engine to populate the feed.</p>
+    {% endif %}
+  </aside>
+</section>
+
+<section class="layers">
+  <h2 class="section-title">Three layers, one machine</h2>
+  <div class="grid-3">
+    <div class="card layer">
+      <span class="layer-tag">Free</span>
+      <h3>Instant alerts</h3>
+      <p>Public Telegram, Discord and email the moment a watched product drops, restocks, or sees a price move. Fast, useful, free — this is the funnel.</p>
+    </div>
+    <div class="card layer">
+      <span class="layer-tag tag-pro">Premium · ${{ '%.0f'|format(site.premium_price) }}/mo</span>
+      <h3>Resale intelligence</h3>
+      <p>Filter by character, region and price ceiling. eBay sold-listing resale tracking, a collection P/L tracker, and likely-restock windows from historical cadence.</p>
+    </div>
+    <div class="card layer">
+      <span class="layer-tag tag-aff">Affiliate</span>
+      <h3>Built-in margin</h3>
+      <p>Every buy and resale link routes through affiliate programs. Traffic monetizes whether or not someone subscribes — plus brand sponsorships in the digest.</p>
+    </div>
+  </div>
+</section>
+
+<section class="cta card cta-card">
+  <div>
+    <h2>Want it faster, and filtered to only your characters?</h2>
+    <p>Premium gets sub-minute alerts, resale tracking, and your collection's live value.</p>
+  </div>
+  <a class="btn" href="/pricing">See Premium →</a>
+</section>
+
+{% endblock %}

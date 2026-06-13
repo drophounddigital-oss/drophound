@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}{{ digest.title }} — DropHound{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>The digest</h1>
+    <p class="muted">
+      Auto-written from the day's signal ·
+      <span class="badge {{ 'b-restock' if digest.generated_with == 'claude' else 'b-low' }}">
+        {{ 'WRITTEN BY CLAUDE' if digest.generated_with == 'claude' else 'TEMPLATE' }}
+      </span>
+    </p>
+  </div>
+  <div class="seg">
+    <a class="seg-btn {{ 'on' if period == 'daily' else '' }}" href="/digest?period=daily">Daily</a>
+    <a class="seg-btn {{ 'on' if period == 'weekly' else '' }}" href="/digest?period=weekly">Weekly</a>
+  </div>
+</div>
+
+<div class="grid-2">
+  <article class="card digest-body">
+    {{ body_html | safe }}
+  </article>
+
+  <aside class="card">
+    <div class="card-head"><h3>Social captions</h3><span class="muted">ready to post</span></div>
+    <ul class="captions">
+      {% for c in digest.captions %}
+      <li>
+        <p>{{ c }}</p>
+        <button class="btn btn-sm btn-ghost copy" data-copy="{{ c }}">Copy</button>
+      </li>
+      {% endfor %}
+    </ul>
+    <p class="micro">
+      {{ digest.counts.events }} events · {{ digest.counts.movers }} movers ·
+      {{ digest.counts.upcoming }} predicted restocks fed into this digest.
+    </p>
+  </aside>
+</div>
+
+{% endblock %}

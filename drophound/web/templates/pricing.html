@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Pricing — DropHound{% endblock %}
+{% block content %}
+
+{% if upgraded %}
+<div class="banner banner-ok">✅ Upgraded to Premium (demo). Your <a href="/app">dashboard</a> now shows filtered alerts and restock predictions.</div>
+{% endif %}
+
+<div class="page-head center">
+  <h1>Simple pricing</h1>
+  <p class="muted">Free gets you in the door. Premium makes you fast.</p>
+</div>
+
+<div class="grid-2 plans">
+  <div class="card plan">
+    <span class="plan-name">Free</span>
+    <div class="plan-price">$0<span>/forever</span></div>
+    <ul class="checklist">
+      <li>Public Telegram, Discord &amp; email alerts</li>
+      <li>All tracked brands &amp; characters</li>
+      <li>Live public drops feed</li>
+      <li>Daily digest</li>
+    </ul>
+    <a class="btn btn-ghost block" href="/#join">Join free</a>
+  </div>
+
+  <div class="card plan plan-pro">
+    <span class="plan-name">Premium <span class="badge b-restock">POPULAR</span></span>
+    <div class="plan-price">${{ '%.0f'|format(site.premium_price) }}<span>/month</span></div>
+    <ul class="checklist">
+      <li><strong>Faster, filtered alerts</strong> — by character, region &amp; price ceiling</li>
+      <li><strong>Resale tracking</strong> — eBay sold-listing medians &amp; trends</li>
+      <li><strong>Collection P/L</strong> — live value of everything you own</li>
+      <li><strong>Restock predictions</strong> — likely windows from history</li>
+      <li>Members-only Discord &amp; verified-seller lists</li>
+    </ul>
+    <form action="/upgrade" method="post">
+      <input type="hidden" name="email" value="demo@drophound.app" />
+      <button class="btn block" type="submit">Upgrade — ${{ '%.0f'|format(site.premium_price) }}/mo</button>
+    </form>
+    <p class="micro center">Demo checkout. Wire Stripe via <code>STRIPE_SECRET_KEY</code> + <code>STRIPE_PRICE_ID</code>.</p>
+  </div>
+</div>
+
+{% endblock %}

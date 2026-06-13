@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{% block title %}DropHound — never miss a drop{% endblock %}</title>
+  <meta name="description" content="Real-time drop alerts and resale intelligence for blind-box designer-toy collectors: Labubu, Pop Mart, Sonny Angel, Smiski." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2C12 2 4 11 4 16a8 8 0 0 0 16 0c0-5-8-14-8-14z' fill='%235b4df0'/></svg>" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="/">
+      <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C12 2 4 11 4 16a8 8 0 0 0 16 0c0-5-8-14-8-14z" fill="currentColor"/></svg>
+      Drop<span class="brand-accent">Hound</span>
+    </a>
+    <nav class="nav-links">
+      <a href="/watch">Browse &amp; watch</a>
+      <a href="/drops">Drops</a>
+      <a href="/app">Dashboard</a>
+      <a href="/collection">Collection</a>
+      <a href="/digest">Digest</a>
+      <a href="/pricing">Pricing</a>
+    </nav>
+    <a class="btn btn-sm" href="/#join">Get free alerts</a>
+  </header>
+
+  <main class="container">
+    {% block content %}{% endblock %}
+  </main>
+
+  <footer class="footer">
+    <div>
+      <strong>DropHound</strong> — drop tracking &amp; resale intelligence for blind-box collectors.
+    </div>
+    <div class="footer-sub">
+      Alerts run in dry-run mode until channels are configured · resale figures are illustrative.
+    </div>
+  </footer>
+  <script src="/static/app.js" defer></script>
+</body>
+</html>

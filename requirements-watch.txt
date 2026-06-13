@@ -1,0 +1,5 @@
+# Extra dependency for the optional local Pop Mart browser watcher
+# (tools/watch_popmart.py). Not needed for the core app or Shopify monitoring.
+#   pip install -r requirements-watch.txt
+#   python -m playwright install chromium
+playwright>=1.40

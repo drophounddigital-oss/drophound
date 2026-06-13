@@ -1,0 +1,25 @@
+# Render.com Blueprint — free, always-on web service with HTTPS + an *.onrender.com domain.
+# Deploy: render.com -> New + -> Blueprint -> connect this repo -> Apply.
+services:
+  - type: web
+    name: drophound
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python -m drophound serve --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.8"
+      # Ships the full catalog with the deploy (see deploy/drophound.db).
+      - key: DROPHOUND_DB_PATH
+        value: deploy/drophound.db
+      # Optional: set these in the Render dashboard to make the live site send
+      # real alerts. Left unset, everything runs safely in dry-run mode.
+      # - key: TELEGRAM_BOT_TOKEN
+      # - key: TELEGRAM_CHAT_ID
+      # - key: DISCORD_WEBHOOK_URL
+      # - key: RESEND_API_KEY
+      # - key: DROPHOUND_EMAIL_FROM
+      # - key: DROPHOUND_HOOK_SECRET

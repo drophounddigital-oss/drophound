@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Live drops — DropHound{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Live drops</h1>
+    <p class="muted">Every restock, drop and price move across tracked retailers. {{ site.tracked }} products watched.</p>
+  </div>
+  <a class="btn btn-ghost" href="/#join">Get these as alerts →</a>
+</div>
+
+{% if events %}
+<div class="feed-list">
+  {% for d in events %}
+  <article class="drop-row card">
+    <span class="thumb lg" style="background:{{ d.color }}">{{ d.initials }}</span>
+    <div class="drop-main">
+      <div class="drop-title-row">
+        <span class="badge {{ d.badge_class }}">{{ d.badge }}</span>
+        <h3>{{ d.name }}</h3>
+      </div>
+      <p class="muted">{{ d.brand }} · {{ d.character }} · {{ d.retailer }} ({{ d.region }}) · {{ d.age }}</p>
+    </div>
+    <div class="drop-prices">
+      <div class="price-now">{{ d.price | money }}<span>retail</span></div>
+      <div class="price-resale">{{ d.resale_median | money }}<span>resale{% if d.multiple %} · {{ d.multiple }}x{% endif %}</span></div>
+    </div>
+    <div class="drop-actions">
+      <a class="btn btn-sm" href="/go/{{ d.product_id }}?to=popmart" rel="nofollow" target="_blank">Buy</a>
+      <a class="btn btn-sm btn-ghost" href="/go/{{ d.product_id }}?to=ebay" rel="nofollow" target="_blank">Resale</a>
+    </div>
+  </article>
+  {% endfor %}
+</div>
+{% else %}
+<p class="empty card">No drops recorded yet. Run <code>python -m drophound demo</code> to populate the feed.</p>
+{% endif %}
+
+{% endblock %}

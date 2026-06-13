@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — DropHound Premium{% endblock %}
+{% block content %}
+
+{% if not sub %}
+<div class="page-head"><h1>Premium dashboard</h1></div>
+<div class="empty card">
+  <p>No demo user found. Seed the database to explore the premium dashboard:</p>
+  <pre><code>python -m drophound demo</code></pre>
+</div>
+{% else %}
+
+<div class="page-head">
+  <div>
+    <h1>Welcome back <span class="badge b-restock">PREMIUM</span></h1>
+    <p class="muted">{{ sub['email'] }} · alert filters — {{ filter_label }}</p>
+  </div>
+  <a class="btn btn-ghost" href="/collection">View collection →</a>
+</div>
+
+<section>
+  <h2 class="section-title">Matched for you</h2>
+  {% if matched %}
+  <div class="feed-list">
+    {% for d in matched %}
+    <article class="drop-row card compact">
+      <span class="thumb" style="background:{{ d.color }}">{{ d.initials }}</span>
+      <div class="drop-main">
+        <div class="drop-title-row"><span class="badge {{ d.badge_class }}">{{ d.badge }}</span><h3>{{ d.name }}</h3></div>
+        <p class="muted">{{ d.retailer }} ({{ d.region }}) · {{ d.age }}</p>
+      </div>
+      <div class="drop-prices">
+        <div class="price-now">{{ d.price | money }}<span>retail</span></div>
+        <div class="price-resale">{{ d.resale_median | money }}<span>resale{% if d.multiple %} · {{ d.multiple }}x{% endif %}</span></div>
+      </div>
+      <div class="drop-actions"><a class="btn btn-sm" href="/go/{{ d.product_id }}?to=popmart" target="_blank">Buy</a></div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty card">Nothing matched your filters in the last two weeks. Loosen them or check the <a href="/drops">full feed</a>.</p>
+  {% endif %}
+</section>
+
+<div class="grid-2">
+  <section class="card">
+    <div class="card-head"><h3>Resale movers</h3><span class="muted">7-day</span></div>
+    {% if movers %}
+    <table class="data">
+      <thead><tr><th>Item</th><th class="num">Median</th><th class="num">Trend</th><th class="num">vs retail</th></tr></thead>
+      <tbody>
+        {% for m in movers %}
+        <tr>
+          <td>{{ m.name }}</td>
+          <td class="num">{{ m.median | money }}</td>
+          <td class="num {{ 'up' if m.trend_pct >= 0 else 'down' }}">{{ m.trend_pct | pct }}</td>
+          <td class="num">{% if m.multiple %}{{ m.multiple }}x{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="empty">No resale history yet.</p>{% endif %}
+  </section>
+
+  <section class="card">
+    <div class="card-head"><h3>Likely restocks</h3><span class="muted">predicted</span></div>
+    {% if upcoming %}
+    <table class="data">
+      <thead><tr><th>Item</th><th>Window</th><th class="num">ETA</th></tr></thead>
+      <tbody>
+        {% for u in upcoming %}
+        <tr>
+          <td>{{ u.name }}</td>
+          <td class="muted">{{ u.label }}</td>
+          <td class="num">{% if u.days_until >= 0 %}{{ u.days_until }}d{% else %}due{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}<p class="empty">Not enough history to predict restocks yet.</p>{% endif %}
+  </section>
+</div>
+
+{% endif %}
+{% endblock %}

@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}Browse &amp; watch — DropHound{% endblock %}
+{% block content %}
+
+<div class="page-head">
+  <div>
+    <h1>Pick what you watch</h1>
+    <p class="muted">{{ site.tracked }} products across every tracked store. Star the ones you
+      care about and only get alerts for those.</p>
+  </div>
+  <div class="watch-count-badge">★ <span id="watchCount">0</span> watching</div>
+</div>
+
+<div class="card watch-bar">
+  <div class="email-row">
+    <input type="email" id="email" placeholder="your@email.com — to save your picks" />
+    <button class="btn btn-sm" id="loadBtn" type="button">Load my list</button>
+  </div>
+  <div class="search-row">
+    <input type="text" id="q" placeholder="Search Labubu, Skullpanda, blind box…" />
+    <label class="instock-toggle"><input type="checkbox" id="inStock" /> In stock only</label>
+    <button class="btn btn-sm" id="searchBtn" type="button">Search</button>
+  </div>
+  <div class="chips" id="chips">
+    {% for c in popular %}<button class="chip" data-c="{{ c }}">{{ c }}</button>{% endfor %}
+    <button class="chip chip-clear" data-c="">All</button>
+  </div>
+</div>
+
+<p class="muted" id="resultMeta" style="margin:14px 2px;"></p>
+<div class="catalog-grid" id="grid"></div>
+
+<div class="pager" id="pager" style="display:none;">
+  <button class="btn btn-ghost btn-sm" id="prevBtn" type="button">← Prev</button>
+  <span id="pageInfo" class="muted"></span>
+  <button class="btn btn-ghost btn-sm" id="nextBtn" type="button">Next →</button>
+</div>
+
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  const state = { q: "", character: "", inStock: false, page: 1,
+                  email: localStorage.getItem("dh_email") || "" };
+  if (state.email) $("email").value = state.email;
+
+  const money = (v) => v == null ? "—" : "$" + Number(v).toFixed(2);
+  const badge = (s) => s === "in_stock"
+    ? '<span class="badge b-restock">IN STOCK</span>'
+    : (s === "sold_out" ? '<span class="badge b-sold">SOLD OUT</span>'
+                        : '<span class="badge b-low">UNKNOWN</span>');
+
+  async function post(url, data) {
+    const body = new URLSearchParams(data);
+    const r = await fetch(url, { method: "POST", body });
+    return r.json();
+  }
+
+  function card(p) {
+    const watched = p.watched ? "on" : "";
+    const label = p.watched ? "✓ Watching" : "★ Watch";
+    const resale = p.resale_median ? ` · resale ${money(p.resale_median)}` : "";
+    return `<div class="cat-card">
+      <div class="cat-top">
+        <span class="thumb" style="background:${p.color}">${p.initials}</span>
+        ${badge(p.status)}
+      </div>
+      <div class="cat-name">${p.name}</div>
+      <div class="cat-sub muted">${p.brand} · ${p.character} · ${p.retailer}</div>
+      <div class="cat-price">${money(p.price)}<span>${resale}</span></div>
+      <button class="watch-btn ${watched}" data-id="${p.id}" type="button">${label}</button>
+    </div>`;
+  }
+
+  async function load() {
+    const qs = new URLSearchParams({ q: state.q, character: state.character,
+      in_stock: state.inStock ? "1" : "0", page: state.page, email: state.email });
+    const data = await (await fetch("/api/catalog?" + qs)).json();
+    $("watchCount").textContent = data.watch_count;
+    $("resultMeta").textContent = `${data.total.toLocaleString()} products` +
+      (state.q ? ` matching “${state.q}”` : "") + (state.character ? ` · ${state.character}` : "") +
+      (state.inStock ? " · in stock" : "");
+    $("grid").innerHTML = data.products.map(card).join("") ||
+      '<p class="empty">No matches. Try another search.</p>';
+    $("pager").style.display = data.pages > 1 ? "flex" : "none";
+    $("pageInfo").textContent = `Page ${data.page} of ${data.pages}`;
+    $("prevBtn").disabled = data.page <= 1;
+    $("nextBtn").disabled = data.page >= data.pages;
+  }
+
+  async function toggle(btn) {
+    state.email = $("email").value.trim().toLowerCase();
+    if (!state.email || !state.email.includes("@")) {
+      $("email").focus(); $("email").classList.add("nudge");
+      setTimeout(() => $("email").classList.remove("nudge"), 1200); return;
+    }
+    localStorage.setItem("dh_email", state.email);
+    const id = btn.dataset.id;
+    const on = btn.classList.contains("on");
+    const res = await post(on ? "/watch/remove" : "/watch/add",
+                           { email: state.email, product_id: id });
+    if (res.error) { alert(res.error); return; }
+    btn.classList.toggle("on", res.watched);
+    btn.textContent = res.watched ? "✓ Watching" : "★ Watch";
+    $("watchCount").textContent = res.count;
+  }
+
+  $("grid").addEventListener("click", (e) => {
+    const b = e.target.closest(".watch-btn"); if (b) toggle(b);
+  });
+  $("searchBtn").addEventListener("click", () => {
+    state.q = $("q").value.trim(); state.inStock = $("inStock").checked;
+    state.page = 1; load();
+  });
+  $("q").addEventListener("keydown", (e) => { if (e.key === "Enter") $("searchBtn").click(); });
+  $("chips").addEventListener("click", (e) => {
+    const c = e.target.closest(".chip"); if (!c) return;
+    document.querySelectorAll(".chip").forEach((x) => x.classList.remove("on"));
+    c.classList.add("on");
+    state.character = c.dataset.c; state.page = 1; load();
+  });
+  $("loadBtn").addEventListener("click", () => {
+    state.email = $("email").value.trim().toLowerCase();
+    localStorage.setItem("dh_email", state.email); state.page = 1; load();
+  });
+  $("prevBtn").addEventListener("click", () => { if (state.page > 1) { state.page--; load(); } });
+  $("nextBtn").addEventListener("click", () => { state.page++; load(); });
+
+  load();
+})();
+</script>
+{% endblock %}

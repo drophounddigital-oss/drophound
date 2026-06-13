@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Collection — DropHound{% endblock %}
+{% block content %}
+
+{% if not sub %}
+<div class="page-head"><h1>Collection tracker</h1></div>
+<div class="empty card"><p>Seed the demo to see a collection with live resale value:</p><pre><code>python -m drophound demo</code></pre></div>
+{% else %}
+
+<div class="page-head">
+  <div><h1>Your collection</h1><p class="muted">{{ summary['items']|length }} items · live resale value from eBay sold listings</p></div>
+</div>
+
+<div class="grid-3 totals">
+  <div class="card stat-card">
+    <span class="stat-label">Cost basis</span>
+    <span class="stat-value">{{ summary.cost_total | money }}</span>
+  </div>
+  <div class="card stat-card">
+    <span class="stat-label">Current value</span>
+    <span class="stat-value">{{ summary.value_total | money }}</span>
+  </div>
+  <div class="card stat-card {{ 'up' if summary.gain >= 0 else 'down' }}">
+    <span class="stat-label">Unrealized P/L</span>
+    <span class="stat-value">{{ summary.gain | money }} <small>({{ summary.gain_pct | pct }})</small></span>
+  </div>
+</div>
+
+<section class="card">
+  <table class="data">
+    <thead>
+      <tr><th>Item</th><th class="num">Qty</th><th class="num">Paid</th><th class="num">Resale</th><th class="num">Value</th><th class="num">P/L</th></tr>
+    </thead>
+    <tbody>
+      {% for it in summary['items'] %}
+      <tr>
+        <td class="item-cell">
+          <span class="thumb sm" style="background:{{ it.color }}">{{ it.initials }}</span>
+          <span>{{ it.name }}<br><small class="muted">{{ it.condition }}</small></span>
+        </td>
+        <td class="num">{{ it.qty }}</td>
+        <td class="num">{{ it.paid_price | money }}</td>
+        <td class="num">{{ it.median | money }}</td>
+        <td class="num">{{ it.value | money }}</td>
+        <td class="num {{ 'up' if it.gain >= 0 else 'down' }}">{{ it.gain | money }}{% if it.gain_pct is not none %}<br><small>{{ it.gain_pct | pct }}</small>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</section>
+
+{% endif %}
+{% endblock %}

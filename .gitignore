@@ -1,0 +1,14 @@
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+var/
+*.db
+*.db-wal
+*.db-shm
+.env
+.DS_Store
+
+# ship the demo catalog with deploys
+!deploy/drophound.db
