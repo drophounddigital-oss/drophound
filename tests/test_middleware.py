@@ -96,18 +96,20 @@ def test_session_cookie_set(client):
     assert "dh_sid" in r.cookies or "dh_sid" in r.headers.get("set-cookie", "")
 
 
-# ---- watchlist input validation ------------------------------------------- #
-def test_watch_add_bad_email(client):
-    r = client.post("/watch/add", data={"email": "notanemail", "product_id": "1"})
-    assert r.status_code == 400
+# ---- watchlist auth + input validation ------------------------------------ #
+def test_watch_add_requires_login(client):
+    # No session → 401
+    r = client.post("/watch/add", data={"product_id": "1"})
+    assert r.status_code == 401
     assert "error" in r.json()
 
 
 def test_watch_add_bad_pid(client):
-    r = client.post("/watch/add", data={"email": "ok@example.com", "product_id": "abc"})
+    # Bad product_id → 400 even before session check (pid validated first)
+    r = client.post("/watch/add", data={"product_id": "abc"})
     assert r.status_code == 400
 
 
-def test_watch_remove_bad_email(client):
-    r = client.post("/watch/remove", data={"email": "bad", "product_id": "1"})
-    assert r.status_code == 400
+def test_watch_remove_requires_login(client):
+    r = client.post("/watch/remove", data={"product_id": "1"})
+    assert r.status_code == 401

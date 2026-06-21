@@ -9,18 +9,27 @@
     <p class="muted">{{ site.tracked }} products across every tracked store. Star the ones you
       care about and only get alerts for those.</p>
   </div>
+  {% if site.current_user %}
   <div class="watch-count-badge" data-tip="Products you're watching">
     ★ <span class="watch-count">0</span> watching
   </div>
+  {% endif %}
 </div>
 
-<div class="card watch-bar">
-  <div class="email-row">
-    <input type="email" id="watch-email" placeholder="your@email.com — to save your picks"
-           autocomplete="email" />
-    <button class="btn btn-sm" id="load-btn" type="button"
-            data-tip="Load your saved watchlist">Load my list</button>
+{% if not site.current_user %}
+<div class="auth-nudge card">
+  <div>
+    <strong>Log in to save your watchlist</strong>
+    <p class="muted" style="margin:4px 0 0">Create a free account to get restock alerts for exactly the drops you care about.</p>
   </div>
+  <div class="auth-nudge-btns">
+    <a class="btn btn-ghost btn-sm" href="/login?next=/watch">Log in</a>
+    <a class="btn btn-sm" href="/register">Sign up free</a>
+  </div>
+</div>
+{% endif %}
+
+<div class="card watch-bar">
   <div class="search-row">
     <input type="text" id="catalog-search" placeholder="Search Labubu, Skullpanda, blind box…" />
     <label class="instock-toggle" data-tip="Only show items currently in stock">
@@ -39,7 +48,7 @@
   <span id="catalog-total">—</span> products
 </p>
 
-<div id="catalog-grid" data-email=""></div>
+<div id="catalog-grid" data-logged-in="{{ 'true' if site.current_user else 'false' }}"></div>
 
 <div class="pager" id="pager">
   <button class="btn btn-ghost btn-sm" id="page-prev" type="button"
@@ -48,29 +57,5 @@
   <button class="btn btn-ghost btn-sm" id="page-next" type="button"
           data-tip="Next page">Next →</button>
 </div>
-
-<script>
-// Wire email field into catalog grid so app.js picks it up
-(function() {
-  const grid = document.getElementById("catalog-grid");
-  const emailEl = document.getElementById("watch-email");
-  const loadBtn = document.getElementById("load-btn");
-  const saved = localStorage.getItem("dh_email") || "";
-  if (saved) { emailEl.value = saved; grid.dataset.email = saved; }
-  loadBtn.addEventListener("click", () => {
-    const v = emailEl.value.trim().toLowerCase();
-    if (v && v.includes("@")) {
-      localStorage.setItem("dh_email", v);
-      grid.dataset.email = v;
-      // Re-trigger the catalog load from app.js
-      grid.dispatchEvent(new CustomEvent("dh:reload"));
-    } else {
-      emailEl.focus();
-      emailEl.classList.add("nudge");
-      setTimeout(() => emailEl.classList.remove("nudge"), 1200);
-    }
-  });
-})();
-</script>
 
 {% endblock %}

@@ -35,7 +35,9 @@ from ..engine.alerts import AlertMessage, broadcast_dispatchers
 from ..middleware import LoggingMiddleware, RateLimitMiddleware, SessionMiddleware, get_session_id
 from ..stats import premium_multiple, trend_pct
 from ..util import humanize_age, money, now_utc, parse_iso
-from ..validation import sanitize_str, validate_email
+from ..validation import (
+    hash_password, sanitize_str, validate_email, validate_password, verify_password,
+)
 
 logger = logging.getLogger("drophound")
 
@@ -188,9 +190,9 @@ def md_lite(text: str) -> str:
     return "\n".join(out)
 
 
-def site_context(conn: sqlite3.Connection) -> dict:
+def site_context(conn: sqlite3.Connection, request: Request | None = None) -> dict:
     s = get_settings()
-    return {
+    ctx: dict = {
         "base_url": s.base_url.rstrip("/"),
         "premium_price": s.premium_price,
         "tracked": db.one(conn, "SELECT COUNT(*) c FROM products")["c"],
@@ -201,6 +203,9 @@ def site_context(conn: sqlite3.Connection) -> dict:
         )["c"],
         "subscribers": db.one(conn, "SELECT COUNT(*) c FROM subscribers")["c"],
     }
+    if request is not None:
+        ctx["current_user"] = get_current_user(conn, request)
+    return ctx
 
 
 # --------------------------------------------------------------------------- #
@@ -214,7 +219,7 @@ async def landing(request: Request):
         drops = [event_view(conn, r, now) for r in rows]
         ctx = {
             "drops": drops,
-            "site": site_context(conn),
+            "site": site_context(conn, request),
             "subscribed": request.query_params.get("subscribed") == "1",
             "error": request.query_params.get("error") == "1",
         }
@@ -253,7 +258,7 @@ async def drops_page(request: Request):
         events = [event_view(conn, r, now) for r in rows]
         return templates.TemplateResponse(
             request, "drops.html",
-            {"events": events, "site": site_context(conn)},
+            {"events": events, "site": site_context(conn, request)},
         )
     finally:
         conn.close()
@@ -267,7 +272,7 @@ async def dashboard(request: Request):
         if not sub:
             return templates.TemplateResponse(
                 request, "dashboard.html",
-                {"sub": None, "site": site_context(conn)},
+                {"sub": None, "site": site_context(conn, request)},
             )
         rows = recent_event_rows(conn, types=("drop", "restock", "price_drop"),
                                  limit=60, since_hours=24 * 14)
@@ -281,7 +286,7 @@ async def dashboard(request: Request):
             "matched": matched,
             "movers": movers,
             "upcoming": upcoming,
-            "site": site_context(conn),
+            "site": site_context(conn, request),
         }
         return templates.TemplateResponse(request, "dashboard.html", ctx)
     finally:
@@ -295,7 +300,7 @@ async def collection_page(request: Request):
         summary = collection_summary(conn, sub["id"]) if sub else None
         return templates.TemplateResponse(
             request, "collection.html",
-            {"sub": sub, "summary": summary, "site": site_context(conn)},
+            {"sub": sub, "summary": summary, "site": site_context(conn, request)},
         )
     finally:
         conn.close()
@@ -306,7 +311,7 @@ async def pricing(request: Request):
     try:
         return templates.TemplateResponse(
             request, "pricing.html",
-            {"site": site_context(conn),
+            {"site": site_context(conn, request),
              "stripe_enabled": get_settings().has_stripe,
              "upgraded": request.query_params.get("upgraded") == "1",
              "error": request.query_params.get("error") == "1"},
@@ -349,7 +354,7 @@ async def upgrade_success(request: Request):
     conn = open_conn()
     try:
         return templates.TemplateResponse(
-            request, "upgrade_success.html", {"site": site_context(conn)})
+            request, "upgrade_success.html", {"site": site_context(conn, request)})
     finally:
         conn.close()
 
@@ -399,7 +404,7 @@ async def digest_page(request: Request):
         return templates.TemplateResponse(
             request, "digest.html",
             {"digest": d, "body_html": md_lite(d["body"]), "period": period,
-             "site": site_context(conn)},
+             "site": site_context(conn, request)},
         )
     finally:
         conn.close()
@@ -587,6 +592,12 @@ _RESALE_SUB = ("(SELECT median FROM resale_prices r WHERE r.product_id=p.id "
                "ORDER BY r.captured_at DESC, r.id DESC LIMIT 1)")
 
 
+def get_current_user(conn: sqlite3.Connection, request: Request) -> sqlite3.Row | None:
+    """Return the logged-in subscriber for this browser session, or None."""
+    sid = get_session_id(request)
+    return db.one(conn, "SELECT * FROM subscribers WHERE session_id = ?", (sid,))
+
+
 def get_or_create_subscriber(conn: sqlite3.Connection, email: str,
                              session_id: str | None = None) -> sqlite3.Row | None:
     email = (email or "").strip().lower()
@@ -645,12 +656,97 @@ def _watched_ids(conn, email):
     return ids, sub
 
 
+async def register_page(request: Request):
+    conn = open_conn()
+    try:
+        if request.method == "POST":
+            form = await request.form()
+            try:
+                email = validate_email(form.get("email") or "")
+            except ValueError as exc:
+                return templates.TemplateResponse(request, "login.html",
+                    {"site": site_context(conn, request), "error": str(exc), "tab": "register"},
+                    status_code=400)
+            try:
+                password = validate_password(form.get("password") or "")
+            except ValueError as exc:
+                return templates.TemplateResponse(request, "login.html",
+                    {"site": site_context(conn, request), "error": str(exc), "tab": "register"},
+                    status_code=400)
+            existing = get_subscriber(conn, email)
+            if existing and existing["password_hash"]:
+                return templates.TemplateResponse(request, "login.html",
+                    {"site": site_context(conn, request),
+                     "error": "An account with that email already exists. Log in instead.",
+                     "tab": "register"}, status_code=400)
+            sid = get_session_id(request)
+            pw_hash = hash_password(password)
+            if existing:
+                db.execute(conn,
+                    "UPDATE subscribers SET password_hash=?, session_id=? WHERE id=?",
+                    (pw_hash, sid, existing["id"]))
+            else:
+                db.execute(conn,
+                    """INSERT INTO subscribers (email, tier, created_at, session_id, password_hash)
+                       VALUES (?, 'free', ?, ?, ?)""",
+                    (email, now_utc().isoformat(), sid, pw_hash))
+            return RedirectResponse("/watch", status_code=303)
+        return templates.TemplateResponse(request, "login.html",
+            {"site": site_context(conn, request), "tab": "register"})
+    finally:
+        conn.close()
+
+
+async def login_page(request: Request):
+    conn = open_conn()
+    try:
+        if request.method == "POST":
+            form = await request.form()
+            try:
+                email = validate_email(form.get("email") or "")
+            except ValueError as exc:
+                return templates.TemplateResponse(request, "login.html",
+                    {"site": site_context(conn, request), "error": str(exc), "tab": "login"},
+                    status_code=400)
+            password = form.get("password") or ""
+            sub = get_subscriber(conn, email)
+            pw_hash = (sub["password_hash"] if sub and "password_hash" in sub.keys() else None)
+            if not sub or not pw_hash or not verify_password(password, pw_hash):
+                return templates.TemplateResponse(request, "login.html",
+                    {"site": site_context(conn, request),
+                     "error": "Incorrect email or password.", "tab": "login"}, status_code=400)
+            sid = get_session_id(request)
+            db.execute(conn, "UPDATE subscribers SET session_id=? WHERE id=?", (sid, sub["id"]))
+            next_url = sanitize_str(request.query_params.get("next") or "/watch", 200)
+            if not next_url.startswith("/"):
+                next_url = "/watch"
+            return RedirectResponse(next_url, status_code=303)
+        return templates.TemplateResponse(request, "login.html",
+            {"site": site_context(conn, request), "tab": "login"})
+    finally:
+        conn.close()
+
+
+async def logout(request: Request):
+    conn = open_conn()
+    try:
+        sid = get_session_id(request)
+        sub = db.one(conn, "SELECT id FROM subscribers WHERE session_id=?", (sid,))
+        if sub:
+            db.execute(conn, "UPDATE subscribers SET session_id=NULL WHERE id=?", (sub["id"],))
+        response = RedirectResponse("/login", status_code=303)
+        response.delete_cookie("dh_sid")
+        return response
+    finally:
+        conn.close()
+
+
 async def watch_page(request: Request):
     conn = open_conn()
     try:
         return templates.TemplateResponse(
             request, "watch.html",
-            {"site": site_context(conn), "popular": POPULAR_CHARACTERS})
+            {"site": site_context(conn, request), "popular": POPULAR_CHARACTERS})
     finally:
         conn.close()
 
@@ -664,32 +760,27 @@ async def api_catalog(request: Request):
         page = max(1, int(qp.get("page", "1")))
     except ValueError:
         page = 1
-    try:
-        email = validate_email(qp.get("email") or "")
-    except ValueError:
-        email = ""
 
-    # Cache unfiltered first-page catalog for 30s (the common browse case)
+    # Cache unfiltered catalog for 30s; skip cache for logged-in users (watched state varies)
     cache_key = f"catalog:{q}:{character}:{in_stock}:{page}"
-    hit = cache.get(cache_key) if not email else None
-    if hit:
-        watched_count = 0
-        if email:
-            conn = open_conn()
-            try:
-                watched, _ = _watched_ids(conn, email)
-                watched_count = len(watched)
-            finally:
-                conn.close()
-        return JSONResponse({**hit, "watch_count": watched_count})
-
     conn = open_conn()
     try:
-        watched, _ = _watched_ids(conn, email)
+        sub = get_current_user(conn, request)
+        logged_in = sub is not None
+
+        hit = cache.get(cache_key) if not logged_in else None
+        if hit:
+            return JSONResponse({**hit, "logged_in": False, "watch_count": 0})
+
+        watched = {r["product_id"] for r in
+                   db.q(conn, "SELECT product_id FROM watchlist WHERE subscriber_id=?",
+                        (sub["id"],))} if sub else set()
         items, total, pages = catalog_page(conn, q, character, in_stock, page, watched)
-        payload = {"products": items, "page": page, "pages": pages, "total": total,
-                   "watch_count": len(watched)}
-        if not email:
+        payload = {
+            "products": items, "page": page, "pages": pages, "total": total,
+            "watch_count": len(watched), "logged_in": logged_in,
+        }
+        if not logged_in:
             cache.set(cache_key, payload, ttl=30)
         return JSONResponse(payload)
     finally:
@@ -715,11 +806,6 @@ async def api_watchlist(request: Request):
 
 async def watch_add(request: Request):
     form = await request.form()
-    # --- input validation ---
-    try:
-        email = validate_email(form.get("email") or "")
-    except ValueError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
     try:
         pid = int(form.get("product_id") or 0)
         if pid <= 0:
@@ -727,18 +813,12 @@ async def watch_add(request: Request):
     except (TypeError, ValueError):
         return JSONResponse({"error": "Invalid product ID."}, status_code=400)
 
-    # --- UUID session lock: the session that registered this email must match ---
-    sid = get_session_id(request)
     conn = open_conn()
     try:
-        sub = get_or_create_subscriber(conn, email, session_id=sid)
+        sub = get_current_user(conn, request)
         if not sub:
-            return JSONResponse({"error": "A valid email is required."}, status_code=400)
-        # Prevent a different browser session from adding to someone else's list
-        stored_sid = sub["session_id"] if "session_id" in sub.keys() else None
-        if stored_sid and stored_sid != sid:
-            return JSONResponse({"error": "Session mismatch — please use your own watchlist."},
-                                status_code=403)
+            return JSONResponse({"error": "Log in to watch products.", "login_required": True},
+                                status_code=401)
         if not db.one(conn, "SELECT 1 FROM products WHERE id = ?", (pid,)):
             return JSONResponse({"error": "Product not found."}, status_code=404)
         try:
@@ -757,30 +837,23 @@ async def watch_add(request: Request):
 async def watch_remove(request: Request):
     form = await request.form()
     try:
-        email = validate_email(form.get("email") or "")
-    except ValueError as exc:
-        return JSONResponse({"error": str(exc)}, status_code=400)
-    try:
         pid = int(form.get("product_id") or 0)
         if pid <= 0:
             raise ValueError
     except (TypeError, ValueError):
         return JSONResponse({"error": "Invalid product ID."}, status_code=400)
 
-    sid = get_session_id(request)
     conn = open_conn()
     try:
-        sub = get_subscriber(conn, email)
-        count = 0
-        if sub:
-            stored_sid = sub["session_id"] if "session_id" in sub.keys() else None
-            if stored_sid and stored_sid != sid:
-                return JSONResponse({"error": "Session mismatch."}, status_code=403)
-            db.execute(conn, "DELETE FROM watchlist WHERE subscriber_id=? AND product_id=?",
-                       (sub["id"], pid))
-            count = db.one(conn, "SELECT COUNT(*) c FROM watchlist WHERE subscriber_id=?",
-                           (sub["id"],))["c"]
-            cache.invalidate(f"watchlist:{sub['id']}")
+        sub = get_current_user(conn, request)
+        if not sub:
+            return JSONResponse({"error": "Log in to watch products.", "login_required": True},
+                                status_code=401)
+        db.execute(conn, "DELETE FROM watchlist WHERE subscriber_id=? AND product_id=?",
+                   (sub["id"], pid))
+        count = db.one(conn, "SELECT COUNT(*) c FROM watchlist WHERE subscriber_id=?",
+                       (sub["id"],))["c"]
+        cache.invalidate(f"watchlist:{sub['id']}")
         return JSONResponse({"watched": False, "count": count})
     finally:
         conn.close()
@@ -796,7 +869,7 @@ async def _not_found(request: Request, exc: Exception) -> Response:
     try:
         return templates.TemplateResponse(
             request, "error.html",
-            {"site": site_context(conn), "code": 404,
+            {"site": site_context(conn, request), "code": 404,
              "message": "We couldn't find that page.",
              "detail": "The URL might have changed or the page may have been removed."},
             status_code=404)
@@ -812,7 +885,7 @@ async def _server_error(request: Request, exc: Exception) -> Response:
     try:
         return templates.TemplateResponse(
             request, "error.html",
-            {"site": site_context(conn), "code": 500,
+            {"site": site_context(conn, request), "code": 500,
              "message": "Something went wrong on our end.",
              "detail": "We've logged the error. Please try again in a moment."},
             status_code=500)
@@ -844,6 +917,9 @@ async def lifespan(app):
 routes = [
     Route("/", landing),
     Route("/subscribe", subscribe, methods=["POST"]),
+    Route("/register", register_page, methods=["GET", "POST"]),
+    Route("/login", login_page, methods=["GET", "POST"]),
+    Route("/logout", logout, methods=["POST"]),
     Route("/watch", watch_page),
     Route("/watch/add", watch_add, methods=["POST"]),
     Route("/watch/remove", watch_remove, methods=["POST"]),

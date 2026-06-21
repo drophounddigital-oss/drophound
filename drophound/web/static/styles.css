@@ -322,3 +322,36 @@ table.data tr:last-child td { border-bottom: none; }
   .drop-prices { gap: 18px; }
   .stats { gap: 26px; }
 }
+
+/* ---- Auth nav items ---------------------------------------------------- */
+.nav-auth { display: flex; gap: 8px; align-items: center; }
+.nav-user { display: flex; gap: 8px; align-items: center; }
+.nav-avatar { width: 32px; height: 32px; border-radius: 50%; background: var(--accent); color: #fff;
+  font-weight: 700; font-size: .85rem; display: flex; align-items: center; justify-content: center;
+  cursor: default; position: relative; }
+
+/* ---- Login / Register page -------------------------------------------- */
+.auth-wrap { display: flex; justify-content: center; padding: 40px 16px; }
+.auth-card { width: 100%; max-width: 420px; padding: 36px 32px; }
+.auth-tabs { display: flex; border-bottom: 1px solid var(--line); margin-bottom: 28px; }
+.auth-tab { flex: 1; text-align: center; padding: 10px; font-weight: 600; font-size: .9rem;
+  color: var(--muted); text-decoration: none; border-bottom: 2px solid transparent;
+  margin-bottom: -1px; transition: color .12s, border-color .12s; }
+.auth-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.auth-title { font-family: var(--display); font-size: 1.5rem; font-weight: 700; margin: 0 0 4px; }
+.auth-sub { margin: 0 0 24px; }
+.auth-form { display: flex; flex-direction: column; gap: 6px; }
+.auth-form input[type="email"], .auth-form input[type="password"] {
+  padding: 11px 14px; border: 1px solid var(--line-strong); border-radius: var(--r);
+  font-size: .95rem; font-family: var(--sans); background: var(--surface); color: var(--ink);
+  transition: border-color .12s; }
+.auth-form input:focus { outline: none; border-color: var(--accent); }
+.field-label { font-size: .82rem; font-weight: 600; color: var(--ink-2); margin-top: 10px; }
+.full-width { width: 100%; margin-top: 8px; padding: 12px; font-size: 1rem; }
+.auth-switch { text-align: center; font-size: .85rem; color: var(--muted); margin-top: 14px; }
+.auth-switch a { color: var(--accent); font-weight: 600; }
+
+/* ---- Watch page auth nudge -------------------------------------------- */
+.auth-nudge { display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 16px 20px; margin-bottom: 20px; flex-wrap: wrap; }
+.auth-nudge-btns { display: flex; gap: 8px; flex-shrink: 0; }

@@ -107,23 +107,25 @@ def test_watch_page_renders(client):
 
 def test_watch_add_list_remove(client, conn):
     pid = client.get("/api/products").json()["products"][0]["id"]
-    add = client.post("/watch/add", data={"email": "picker@example.com", "product_id": pid}).json()
+    # Register an account; the TestClient preserves the session cookie automatically.
+    client.post("/register", data={"email": "picker@example.com", "password": "password123"})
+    add = client.post("/watch/add", data={"product_id": pid}).json()
     assert add["watched"] is True and add["count"] == 1
     # idempotent: adding again stays at 1
-    again = client.post("/watch/add", data={"email": "picker@example.com", "product_id": pid}).json()
+    again = client.post("/watch/add", data={"product_id": pid}).json()
     assert again["count"] == 1
-    wl = client.get("/api/watchlist?email=picker@example.com").json()
-    assert wl["count"] == 1 and wl["products"][0]["id"] == pid
-    assert client.get("/api/catalog?email=picker@example.com").json()["watch_count"] == 1
-    rem = client.post("/watch/remove", data={"email": "picker@example.com", "product_id": pid}).json()
+    assert client.get("/api/catalog").json()["watch_count"] == 1
+    rem = client.post("/watch/remove", data={"product_id": pid}).json()
     assert rem["watched"] is False and rem["count"] == 0
-    # a brand-new email auto-created a free subscriber
     assert db.one(conn, "SELECT tier FROM subscribers WHERE email=?",
                   ("picker@example.com",))["tier"] == "free"
 
 
-def test_watch_requires_valid_email(client):
-    assert client.post("/watch/add", data={"email": "nope", "product_id": "1"}).status_code == 400
+def test_watch_requires_login(client):
+    # Not logged in: watch/add returns 401 with login_required flag
+    r = client.post("/watch/add", data={"product_id": "1"})
+    assert r.status_code == 401
+    assert r.json().get("login_required") is True
 
 
 def test_robots_txt(client):

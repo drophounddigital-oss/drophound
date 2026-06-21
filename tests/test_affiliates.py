@@ -9,13 +9,13 @@ PRODUCT = {
     "product_url": "https://toytokyo.com/products/pop-mart-labubu-exciting-macaron",
 }
 
-# A demo/seed product whose stored URL is a placeholder (retailer is a name, not a domain).
+# A product with no stored URL — should fall back to a search.
 DEMO_PRODUCT = {
     "brand": "Pop Mart",
     "name": "Labubu Big Into Energy",
     "character": "Labubu",
     "retailer": "Pop Mart US",
-    "product_url": "https://www.popmart.com/us/products/placeholder",
+    "product_url": "",
 }
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
 import re
 import secrets
 import time
@@ -78,3 +79,36 @@ def verify_token(token: str, secret: str) -> str | None:
 def generate_reset_token() -> str:
     """Random 32-hex token for password reset (used as the payload)."""
     return secrets.token_hex(32)
+
+
+# --------------------------------------------------------------------------- #
+# Password hashing (stdlib scrypt — no external deps)
+# --------------------------------------------------------------------------- #
+
+def hash_password(password: str) -> str:
+    """Hash a password with scrypt. Format: scrypt:<salt_hex>:<hash_hex>."""
+    salt = os.urandom(16)
+    h = hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1)
+    return f"scrypt:{salt.hex()}:{h.hex()}"
+
+
+def verify_password(password: str, stored: str) -> bool:
+    """Return True if password matches the stored scrypt hash."""
+    try:
+        _, salt_hex, hash_hex = stored.split(":")
+        salt = bytes.fromhex(salt_hex)
+        expected = bytes.fromhex(hash_hex)
+        actual = hashlib.scrypt(password.encode(), salt=salt, n=16384, r=8, p=1)
+        return hmac.compare_digest(actual, expected)
+    except Exception:
+        return False
+
+
+def validate_password(value: str) -> str:
+    """Return stripped password or raise ValueError."""
+    v = (value or "").strip()
+    if len(v) < 8:
+        raise ValueError("Password must be at least 8 characters.")
+    if len(v) > 128:
+        raise ValueError("Password must be under 128 characters.")
+    return v

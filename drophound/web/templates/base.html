@@ -64,14 +64,26 @@
       Drop<span class="brand-accent">Hound</span>
     </a>
     <nav class="nav-links">
-      <a href="/watch">Browse &amp; watch</a>
+      <a href="/watch">Browse</a>
       <a href="/drops">Drops</a>
-      <a href="/app">Dashboard</a>
-      <a href="/collection">Collection</a>
       <a href="/digest">Digest</a>
       <a href="/pricing">Pricing</a>
     </nav>
-    <a class="btn btn-sm" href="/#join">Get free alerts</a>
+    {% if site.current_user %}
+    <div class="nav-user">
+      <span class="nav-avatar" data-tip="{{ site.current_user.email }}">
+        {{ site.current_user.email[0].upper() }}
+      </span>
+      <form action="/logout" method="post" style="display:inline">
+        <button class="btn btn-sm btn-ghost" type="submit">Log out</button>
+      </form>
+    </div>
+    {% else %}
+    <div class="nav-auth">
+      <a class="btn btn-ghost btn-sm" href="/login">Log in</a>
+      <a class="btn btn-sm" href="/register">Sign up free</a>
+    </div>
+    {% endif %}
   </header>
 
   <main class="container">

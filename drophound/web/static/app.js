@@ -87,16 +87,17 @@ function showCatalogSkeleton(container, count = 12) {
 }
 
 // --------------------------------------------------------------------------
-// Optimistic watch-button rendering
-// The button updates INSTANTLY on click; the server call runs in background.
-// If the server fails we revert the button so the user knows to retry.
+// Optimistic watch-button rendering (session-based — no email param needed)
 // --------------------------------------------------------------------------
 document.addEventListener("click", async (e) => {
   const btn = e.target.closest(".watch-btn");
   if (!btn) return;
 
-  const email = btn.dataset.email;
-  if (!email) return; // not signed in
+  // Not logged in: send to login page
+  if (btn.dataset.loggedIn !== "true") {
+    location.href = "/login?next=/watch";
+    return;
+  }
 
   const pid = btn.dataset.pid;
   const isOn = btn.classList.contains("on");
@@ -111,13 +112,13 @@ document.addEventListener("click", async (e) => {
     counterEl.textContent = isOn ? Math.max(0, n - 1) : n + 1;
   }
 
-  // --- Send to server ---
+  // --- Send to server (session cookie is sent automatically) ---
   try {
-    const body = new URLSearchParams({ email, product_id: pid });
+    const body = new URLSearchParams({ product_id: pid });
     const res = await fetch(endpoint, { method: "POST", body });
+    if (res.status === 401) { location.href = "/login?next=/watch"; return; }
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
-    // Confirm with server truth
     btn.classList.toggle("on", data.watched);
     if (counterEl) counterEl.textContent = data.count;
   } catch (err) {
@@ -140,7 +141,7 @@ document.addEventListener("click", async (e) => {
   const grid = document.getElementById("catalog-grid");
   if (!grid) return;
 
-  const email = grid.dataset.email || "";
+  const loggedIn = grid.dataset.loggedIn === "true";
   let currentPage = 1;
   let totalPages = 1;
 
@@ -162,6 +163,11 @@ document.addEventListener("click", async (e) => {
       : p.status === "sold_out"
       ? `<span class="dot dot-red" data-tip="Sold out"></span>`
       : `<span class="dot dot-amber" data-tip="Unknown stock"></span>`;
+    const watchBtn = loggedIn
+      ? `<button class="${watchClass}" data-pid="${p.id}" data-logged-in="true"
+           data-tip="${p.watched ? 'Stop watching' : 'Get alerts for this drop'}">${watchLabel}</button>`
+      : `<button class="watch-btn" data-pid="${p.id}" data-logged-in="false"
+           data-tip="Sign up for alerts">Watch</button>`;
     return `
       <div class="cat-card">
         <div class="cat-thumb" style="background:${p.color}">
@@ -174,10 +180,7 @@ document.addEventListener("click", async (e) => {
           ${p.resale_median ? `<div class="cat-resale" data-tip="eBay median">↗ $${p.resale_median.toFixed(2)}</div>` : ""}
         </div>
         <div class="cat-actions">
-          ${email
-            ? `<button class="${watchClass}" data-pid="${p.id}" data-email="${esc(email)}"
-                 data-tip="${p.watched ? 'Stop watching' : 'Get alerts for this drop'}">${watchLabel}</button>`
-            : `<a class="btn btn-ghost btn-sm" href="/#join" data-tip="Sign up for alerts">Watch</a>`}
+          ${watchBtn}
           <a class="btn btn-ghost btn-sm" href="/go/${p.id}?to=popmart" target="_blank"
              data-tip="Buy this drop">Buy</a>
         </div>
@@ -194,10 +197,7 @@ document.addEventListener("click", async (e) => {
     showCatalogSkeleton(grid);
     const q   = searchEl ? searchEl.value.trim() : "";
     const ins = stockEl  ? (stockEl.checked ? "1" : "0") : "0";
-    const params = new URLSearchParams({
-      q, character: activeChar, in_stock: ins, page,
-      ...(email ? { email } : {}),
-    });
+    const params = new URLSearchParams({ q, character: activeChar, in_stock: ins, page });
     try {
       const res  = await fetch(`/api/catalog?${params}`);
       const data = await res.json();
@@ -240,7 +240,6 @@ document.addEventListener("click", async (e) => {
   if (prevBtn) prevBtn.addEventListener("click", () => load(currentPage - 1));
   if (nextBtn) nextBtn.addEventListener("click", () => load(currentPage + 1));
 
-  // Allow other scripts (watch.html email loader) to trigger a reload
   grid.addEventListener("dh:reload", () => load(1));
 
   load(1);

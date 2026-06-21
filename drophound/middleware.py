@@ -89,7 +89,10 @@ SESSION_MAX_AGE = 60 * 60 * 24 * 365  # 1 year
 
 
 def get_session_id(request: Request) -> str:
-    """Return the browser's session UUID from the cookie (or a fresh one)."""
+    """Return the browser's session UUID — always the same value within one request."""
+    # Middleware stores the consistent sid on request.state before the handler runs.
+    if hasattr(request.state, "session_id"):
+        return request.state.session_id
     return request.cookies.get(SESSION_COOKIE) or str(uuid.uuid4())
 
 
@@ -100,8 +103,9 @@ class SessionMiddleware(BaseHTTPMiddleware):
         sid = get_session_id(request)
         request.state.session_id = sid
         response = await call_next(request)
-        # Refresh the cookie (keeps it alive on each visit)
-        if not request.cookies.get(SESSION_COOKIE):
+        # Always set the cookie so it appears on redirect responses too,
+        # and refreshes the expiry on every visit.
+        if response.status_code not in (204,):
             response.set_cookie(
                 SESSION_COOKIE, sid,
                 max_age=SESSION_MAX_AGE,
