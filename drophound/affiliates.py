@@ -70,12 +70,23 @@ def build_url(settings: Settings, product: Any, target: str) -> str:
     target = (target or "site").lower()
 
     if target in ("site", "popmart", "smiski", "sonnyangel"):
-        # Use the stored product URL — it points directly to the right page.
+        brand = (_field(product, "brand") or "").lower()
+        retailer = (_field(product, "retailer") or "").lower()
+
+        # Pop Mart: always use a name-based search. Their product page handles
+        # are internal IDs that don't match simple slugs, so direct links throw
+        # client-side errors. A full product-name search returns 1-3 results.
+        if "pop mart" in brand or "popmart" in brand:
+            locale = "uk" if "uk" in retailer else "de" if "eu" in retailer else "us"
+            name = _field(product, "name") or _field(product, "character") or "blind box"
+            url = f"https://www.popmart.com/{locale}/search/{quote(name, safe='')}"
+            if settings.popmart_affiliate_ref:
+                return _add_params(url, {"ref": settings.popmart_affiliate_ref})
+            return url
+
+        # All other brands: use the stored product URL (Amazon, etc.).
         url = (_field(product, "product_url") or "").strip()
         if url and url.startswith("http"):
-            brand = (_field(product, "brand") or "").lower()
-            if ("pop mart" in brand or "popmart" in brand) and settings.popmart_affiliate_ref:
-                return _add_params(url, {"ref": settings.popmart_affiliate_ref})
             return url
         # No stored URL — fall back to character-name search on the right site.
         return _retailer_search_url(product)

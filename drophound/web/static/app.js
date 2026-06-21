@@ -181,7 +181,7 @@ document.addEventListener("click", async (e) => {
         </div>
         <div class="cat-actions">
           ${watchBtn}
-          <a class="btn btn-ghost btn-sm" href="/go/${p.id}?to=popmart" target="_blank"
+          <a class="btn btn-ghost btn-sm" href="/go/${p.id}?to=site" target="_blank"
              data-tip="Buy this drop">Buy</a>
         </div>
       </div>`;

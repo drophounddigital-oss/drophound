@@ -17,12 +17,12 @@ POPMART_EU = {
     "product_url": "https://www.popmart.com/de/products/labubu-lets-checkmate",
 }
 
-POPMART_NO_URL = {
+POPMART_UK = {
     "brand": "Pop Mart",
-    "name": "Labubu Unknown Series",
-    "character": "Labubu",
-    "retailer": "Pop Mart US",
-    "product_url": "",
+    "name": "Skullpanda Image of Reality Blind Box",
+    "character": "Skullpanda",
+    "retailer": "Pop Mart UK",
+    "product_url": "https://www.popmart.com/uk/products/skullpanda-image-of-reality",
 }
 
 SMISKI = {
@@ -30,7 +30,7 @@ SMISKI = {
     "name": "Smiski Living Series",
     "character": "Smiski",
     "retailer": "Smiski US",
-    "product_url": "https://www.smiski.com/products/living-series",
+    "product_url": "https://www.amazon.com/s?k=Smiski+Living+Series",
 }
 
 SONNY_ANGEL = {
@@ -38,41 +38,46 @@ SONNY_ANGEL = {
     "name": "Sonny Angel Hippers Blind Box",
     "character": "Sonny Angel",
     "retailer": "Sonny Angel US",
-    "product_url": "https://www.sonnyangel-store.com/products/hippers",
+    "product_url": "https://www.amazon.com/s?k=Sonny+Angel+Hippers",
 }
 
 
-# --- site target (direct product page) ------------------------------------
+# --- Pop Mart: always name-search (direct slugs throw strconv errors) ------
 
-def test_site_target_uses_stored_url():
+def test_popmart_us_uses_name_search():
+    # Pop Mart product page slugs are internal IDs that don't match simple
+    # handles — their JS throws strconv errors on load. Name search returns
+    # 1-3 specific results and always works.
     settings = get_settings()
     url = build_url(settings, POPMART_US, "site")
-    assert url == "https://www.popmart.com/us/products/labubu-exciting-macaron"
-
-
-def test_site_target_smiski_uses_stored_url():
-    settings = get_settings()
-    assert build_url(settings, SMISKI, "site") == "https://www.smiski.com/products/living-series"
-
-
-def test_site_target_sonny_angel_uses_stored_url():
-    settings = get_settings()
-    assert build_url(settings, SONNY_ANGEL, "site") == "https://www.sonnyangel-store.com/products/hippers"
-
-
-def test_site_target_falls_back_to_character_search_when_no_url():
-    settings = get_settings()
-    url = build_url(settings, POPMART_NO_URL, "site")
-    # Fallback: character-name search (not full product name) — short and focused
     assert url.startswith("https://www.popmart.com/us/search/")
-    assert "Labubu" in url
-    assert "+" not in url  # must use %20, not + (path segment)
+    assert "Labubu%20Exciting%20Macaron" in url
+    assert "+" not in url  # %20, not + (path segment, not query string)
 
 
-def test_popmart_eu_fallback_uses_de_locale():
-    no_url = {**POPMART_EU, "product_url": ""}
+def test_popmart_eu_uses_de_locale():
     settings = get_settings()
-    assert build_url(settings, no_url, "site").startswith("https://www.popmart.com/de/search/")
+    url = build_url(settings, POPMART_EU, "site")
+    assert url.startswith("https://www.popmart.com/de/search/")
+    assert "+" not in url
+
+
+def test_popmart_uk_uses_uk_locale():
+    settings = get_settings()
+    url = build_url(settings, POPMART_UK, "site")
+    assert url.startswith("https://www.popmart.com/uk/search/")
+
+
+# --- Non-Pop Mart brands: use stored product_url directly ------------------
+
+def test_smiski_uses_stored_url():
+    settings = get_settings()
+    assert build_url(settings, SMISKI, "site") == "https://www.amazon.com/s?k=Smiski+Living+Series"
+
+
+def test_sonny_angel_uses_stored_url():
+    settings = get_settings()
+    assert build_url(settings, SONNY_ANGEL, "site") == "https://www.amazon.com/s?k=Sonny+Angel+Hippers"
 
 
 # --- eBay target ----------------------------------------------------------
