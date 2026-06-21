@@ -247,6 +247,56 @@ table.data tr:last-child td { border-bottom: none; }
 .success-mark { width: 56px; height: 56px; margin: 0 auto 18px; border-radius: 50%; background: var(--green-wash); color: #0c5c40; font-size: 1.6rem; font-weight: 700; display: flex; align-items: center; justify-content: center; }
 .success-actions { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; margin: 22px 0 14px; }
 
+/* ---- Status dots ---- */
+.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.dot-green { background: var(--green); }
+.dot-red   { background: var(--red); }
+.dot-amber { background: var(--amber); }
+.cat-name-row { display: flex; align-items: center; gap: 6px; }
+
+/* ---- Error page ---- */
+.error-wrap { display: flex; justify-content: center; padding: 48px 0; }
+.error-card { max-width: 480px; text-align: center; }
+.error-code { font-family: var(--display); font-size: 6rem; font-weight: 700; line-height: 1; color: var(--accent); letter-spacing: -.04em; margin-bottom: 12px; }
+
+/* ---- Skeleton loaders ---- */
+@keyframes shimmer {
+  0%   { background-position: -600px 0; }
+  100% { background-position: 600px 0; }
+}
+.skeleton {
+  background: linear-gradient(90deg, var(--line) 25%, var(--surface-2) 50%, var(--line) 75%);
+  background-size: 1200px 100%;
+  animation: shimmer 1.4s infinite linear;
+  border-radius: var(--r);
+}
+.skel-card { height: 180px; border-radius: var(--r); }
+.skel-line { height: 14px; border-radius: 6px; }
+.skel-line.short { width: 55%; }
+.skel-line.medium { width: 75%; }
+.catalog-skeleton { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px,1fr)); gap: 12px; }
+.catalog-skeleton .skel-item { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+
+/* ---- Tooltips ---- */
+[data-tip] { position: relative; }
+[data-tip]::after {
+  content: attr(data-tip);
+  position: absolute; bottom: calc(100% + 6px); left: 50%; transform: translateX(-50%);
+  background: var(--ink); color: #fff;
+  font-size: .72rem; font-family: var(--sans); white-space: nowrap;
+  padding: 4px 9px; border-radius: 6px; pointer-events: none;
+  opacity: 0; transition: opacity .15s;
+  z-index: 100;
+}
+[data-tip]:hover::after { opacity: 1; }
+
+/* ---- Optimistic watch button state ---- */
+.watch-btn.optimistic { opacity: .65; pointer-events: none; }
+.watch-btn.optimistic::after { content: "…"; margin-left: 4px; }
+
+/* ---- Banner variants ---- */
+.banner-err { background: var(--red-wash); border-color: var(--red); color: var(--red); }
+
 /* ---- Footer ---- */
 .footer { border-top: 1px solid var(--line); padding: 34px 32px; text-align: center; color: var(--muted); font-size: .87rem; }
 .footer strong { color: var(--ink); font-family: var(--display); font-weight: 600; }

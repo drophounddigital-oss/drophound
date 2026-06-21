@@ -275,6 +275,43 @@ def cmd_test_alert(args, settings) -> int:
     return 0
 
 
+def cmd_backup(args, settings) -> int:
+    from . import backup as backup_mod
+    conn = _conn(settings)
+    try:
+        dest = backup_mod.backup(conn, settings.db_path)
+        print(f"✓ backup written: {dest}")
+    finally:
+        conn.close()
+    return 0
+
+
+def cmd_restore(args, settings) -> int:
+    from . import backup as backup_mod
+    from pathlib import Path
+    backups = backup_mod.list_backups(settings.db_path)
+    if not getattr(args, "file", None):
+        if not backups:
+            print("No backups found.")
+            return 1
+        print("Available backups (newest first):")
+        for i, b in enumerate(backups):
+            print(f"  [{i}] {b.name}  ({b.stat().st_size // 1024} KB)")
+        print("\nRun:  python -m drophound restore <file>")
+        return 0
+    target = Path(args.file)
+    if not target.is_absolute():
+        # Try resolving relative to the backup dir
+        guesses = [b for b in backups if b.name == target.name or str(b) == str(target)]
+        if not guesses:
+            print(f"Cannot find backup: {args.file}")
+            return 1
+        target = guesses[0]
+    backup_mod.restore(target, settings.db_path)
+    print(f"✓ restored from {target.name}")
+    return 0
+
+
 def cmd_serve(args, settings) -> int:
     import uvicorn
     print(f"→ DropHound on http://{args.host}:{args.port}  (db: {settings.db_path})")
@@ -342,6 +379,13 @@ def build_parser() -> argparse.ArgumentParser:
     svp.set_defaults(func=cmd_serve)
 
     sub.add_parser("demo", help="init + seed + one cycle").set_defaults(func=cmd_demo)
+
+    sub.add_parser("backup", help="write a timestamped DB backup").set_defaults(func=cmd_backup)
+
+    rsp = sub.add_parser("restore", help="rollback to a DB backup")
+    rsp.add_argument("file", nargs="?", help="backup file path (omit to list available backups)")
+    rsp.set_defaults(func=cmd_restore)
+
     return p
 
 

@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}{{ code }} — DropHound{% endblock %}
+{% block description %}An error occurred on DropHound.{% endblock %}
+{% block content %}
+<div class="error-wrap">
+  <div class="card error-card">
+    <div class="error-code">{{ code }}</div>
+    <h1>{{ message }}</h1>
+    <p class="muted">{{ detail }}</p>
+    <div class="success-actions">
+      <a class="btn" href="/">Go home</a>
+      <a class="btn btn-ghost" href="/drops">Live drops</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

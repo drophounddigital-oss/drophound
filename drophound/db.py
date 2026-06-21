@@ -150,6 +150,7 @@ def init_db(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
     # Lightweight migrations so an already-deployed DB picks up new columns.
     _ensure_column(conn, "subscribers", "stripe_customer_id", "TEXT")
+    _ensure_column(conn, "subscribers", "session_id", "TEXT")
     conn.commit()
 
 

@@ -10,6 +10,7 @@ Plus a small JSON API under /api and the AI digest at /digest.
 from __future__ import annotations
 
 import html
+import logging
 import re
 import sqlite3
 from contextlib import asynccontextmanager
@@ -17,6 +18,7 @@ from datetime import timedelta
 
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
+from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse, PlainTextResponse, RedirectResponse, Response
@@ -24,14 +26,18 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
-from .. import affiliates, billing, db, filters
+from .. import affiliates, billing, cache, db, filters
 from ..config import STATIC_DIR, TEMPLATES_DIR, get_settings
 from ..engine import digest as digest_mod
 from ..engine import pipeline
 from ..engine import resale
 from ..engine.alerts import AlertMessage, broadcast_dispatchers
+from ..middleware import LoggingMiddleware, RateLimitMiddleware, SessionMiddleware, get_session_id
 from ..stats import premium_multiple, trend_pct
 from ..util import humanize_age, money, now_utc, parse_iso
+from ..validation import sanitize_str, validate_email
+
+logger = logging.getLogger("drophound")
 
 DEMO_EMAIL = "demo@drophound.app"
 
@@ -219,9 +225,10 @@ async def landing(request: Request):
 
 async def subscribe(request: Request):
     form = await request.form()
-    email = (form.get("email") or "").strip().lower()
-    telegram = (form.get("telegram") or "").strip() or None
-    if "@" not in email or "." not in email.split("@")[-1]:
+    telegram = sanitize_str(form.get("telegram") or "", 64) or None
+    try:
+        email = validate_email(form.get("email") or "")
+    except ValueError:
         return RedirectResponse("/?error=1#join", status_code=303)
     conn = open_conn()
     try:
@@ -580,15 +587,21 @@ _RESALE_SUB = ("(SELECT median FROM resale_prices r WHERE r.product_id=p.id "
                "ORDER BY r.captured_at DESC, r.id DESC LIMIT 1)")
 
 
-def get_or_create_subscriber(conn: sqlite3.Connection, email: str) -> sqlite3.Row | None:
+def get_or_create_subscriber(conn: sqlite3.Connection, email: str,
+                             session_id: str | None = None) -> sqlite3.Row | None:
     email = (email or "").strip().lower()
     if "@" not in email or "." not in email.split("@")[-1]:
         return None
     row = get_subscriber(conn, email)
     if row:
-        return row
-    db.execute(conn, "INSERT INTO subscribers (email, tier, created_at) VALUES (?, 'free', ?)",
-               (email, now_utc().isoformat()))
+        # Stamp session_id on first use if not set
+        if session_id and not (row["session_id"] if "session_id" in row.keys() else None):
+            db.execute(conn, "UPDATE subscribers SET session_id=? WHERE id=?",
+                       (session_id, row["id"]))
+        return get_subscriber(conn, email)
+    db.execute(conn,
+               "INSERT INTO subscribers (email, tier, created_at, session_id) VALUES (?, 'free', ?, ?)",
+               (email, now_utc().isoformat(), session_id))
     return get_subscriber(conn, email)
 
 
@@ -644,20 +657,41 @@ async def watch_page(request: Request):
 
 async def api_catalog(request: Request):
     qp = request.query_params
-    q = qp.get("q", "").strip()
-    character = qp.get("character", "").strip()
+    q = sanitize_str(qp.get("q", ""), 100)
+    character = sanitize_str(qp.get("character", ""), 100)
     in_stock = qp.get("in_stock") == "1"
     try:
         page = max(1, int(qp.get("page", "1")))
     except ValueError:
         page = 1
-    email = (qp.get("email") or "").strip().lower()
+    try:
+        email = validate_email(qp.get("email") or "")
+    except ValueError:
+        email = ""
+
+    # Cache unfiltered first-page catalog for 30s (the common browse case)
+    cache_key = f"catalog:{q}:{character}:{in_stock}:{page}"
+    hit = cache.get(cache_key) if not email else None
+    if hit:
+        watched_count = 0
+        if email:
+            conn = open_conn()
+            try:
+                watched, _ = _watched_ids(conn, email)
+                watched_count = len(watched)
+            finally:
+                conn.close()
+        return JSONResponse({**hit, "watch_count": watched_count})
+
     conn = open_conn()
     try:
         watched, _ = _watched_ids(conn, email)
         items, total, pages = catalog_page(conn, q, character, in_stock, page, watched)
-        return JSONResponse({"products": items, "page": page, "pages": pages,
-                             "total": total, "watch_count": len(watched)})
+        payload = {"products": items, "page": page, "pages": pages, "total": total,
+                   "watch_count": len(watched)}
+        if not email:
+            cache.set(cache_key, payload, ttl=30)
+        return JSONResponse(payload)
     finally:
         conn.close()
 
@@ -681,18 +715,32 @@ async def api_watchlist(request: Request):
 
 async def watch_add(request: Request):
     form = await request.form()
-    email = (form.get("email") or "").strip().lower()
+    # --- input validation ---
     try:
-        pid = int(form.get("product_id"))
+        email = validate_email(form.get("email") or "")
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    try:
+        pid = int(form.get("product_id") or 0)
+        if pid <= 0:
+            raise ValueError
     except (TypeError, ValueError):
-        return JSONResponse({"error": "bad product_id"}, status_code=400)
+        return JSONResponse({"error": "Invalid product ID."}, status_code=400)
+
+    # --- UUID session lock: the session that registered this email must match ---
+    sid = get_session_id(request)
     conn = open_conn()
     try:
-        sub = get_or_create_subscriber(conn, email)
+        sub = get_or_create_subscriber(conn, email, session_id=sid)
         if not sub:
-            return JSONResponse({"error": "a valid email is required"}, status_code=400)
+            return JSONResponse({"error": "A valid email is required."}, status_code=400)
+        # Prevent a different browser session from adding to someone else's list
+        stored_sid = sub["session_id"] if "session_id" in sub.keys() else None
+        if stored_sid and stored_sid != sid:
+            return JSONResponse({"error": "Session mismatch — please use your own watchlist."},
+                                status_code=403)
         if not db.one(conn, "SELECT 1 FROM products WHERE id = ?", (pid,)):
-            return JSONResponse({"error": "unknown product"}, status_code=404)
+            return JSONResponse({"error": "Product not found."}, status_code=404)
         try:
             db.execute(conn, """INSERT INTO watchlist (subscriber_id, product_id, created_at)
                        VALUES (?,?,?)""", (sub["id"], pid, now_utc().isoformat()))
@@ -700,6 +748,7 @@ async def watch_add(request: Request):
             pass  # already watching
         count = db.one(conn, "SELECT COUNT(*) c FROM watchlist WHERE subscriber_id=?",
                        (sub["id"],))["c"]
+        cache.invalidate(f"watchlist:{sub['id']}")
         return JSONResponse({"watched": True, "count": count})
     finally:
         conn.close()
@@ -707,38 +756,89 @@ async def watch_add(request: Request):
 
 async def watch_remove(request: Request):
     form = await request.form()
-    email = (form.get("email") or "").strip().lower()
     try:
-        pid = int(form.get("product_id"))
+        email = validate_email(form.get("email") or "")
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=400)
+    try:
+        pid = int(form.get("product_id") or 0)
+        if pid <= 0:
+            raise ValueError
     except (TypeError, ValueError):
-        return JSONResponse({"error": "bad product_id"}, status_code=400)
+        return JSONResponse({"error": "Invalid product ID."}, status_code=400)
+
+    sid = get_session_id(request)
     conn = open_conn()
     try:
         sub = get_subscriber(conn, email)
         count = 0
         if sub:
+            stored_sid = sub["session_id"] if "session_id" in sub.keys() else None
+            if stored_sid and stored_sid != sid:
+                return JSONResponse({"error": "Session mismatch."}, status_code=403)
             db.execute(conn, "DELETE FROM watchlist WHERE subscriber_id=? AND product_id=?",
                        (sub["id"], pid))
             count = db.one(conn, "SELECT COUNT(*) c FROM watchlist WHERE subscriber_id=?",
                            (sub["id"],))["c"]
+            cache.invalidate(f"watchlist:{sub['id']}")
         return JSONResponse({"watched": False, "count": count})
+    finally:
+        conn.close()
+
+
+# --------------------------------------------------------------------------- #
+# Error handlers
+# --------------------------------------------------------------------------- #
+async def _not_found(request: Request, exc: Exception) -> Response:
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"error": "Not found."}, status_code=404)
+    conn = open_conn()
+    try:
+        return templates.TemplateResponse(
+            request, "error.html",
+            {"site": site_context(conn), "code": 404,
+             "message": "We couldn't find that page.",
+             "detail": "The URL might have changed or the page may have been removed."},
+            status_code=404)
+    finally:
+        conn.close()
+
+
+async def _server_error(request: Request, exc: Exception) -> Response:
+    logger.exception("unhandled error %s %s", request.method, request.url.path)
+    if request.url.path.startswith("/api/"):
+        return JSONResponse({"error": "An unexpected error occurred."}, status_code=500)
+    conn = open_conn()
+    try:
+        return templates.TemplateResponse(
+            request, "error.html",
+            {"site": site_context(conn), "code": 500,
+             "message": "Something went wrong on our end.",
+             "detail": "We've logged the error. Please try again in a moment."},
+            status_code=500)
     finally:
         conn.close()
 
 
 @asynccontextmanager
 async def lifespan(app):
+    # Configure logging on startup
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        datefmt="%Y-%m-%dT%H:%M:%SZ",
+    )
     conn = open_conn()
     try:
         db.init_db(conn)
-        # On a fresh host the bundled DB ships the full catalog; if it's somehow
-        # empty, fall back to the demo seed so the site is never blank.
         if db.one(conn, "SELECT COUNT(*) c FROM products")["c"] == 0:
             from .. import seed as seed_mod
             seed_mod.seed(conn, get_settings())
     finally:
         conn.close()
+    logger.info("drophound started")
     yield
+    logger.info("drophound shutdown")
 
 
 routes = [
@@ -768,8 +868,27 @@ routes = [
     Mount("/static", app=StaticFiles(directory=str(STATIC_DIR)), name="static"),
 ]
 
+# Middleware stack (outermost = first to process the request)
+_ALLOWED_ORIGINS = [
+    "https://drophound-xyy4.onrender.com",
+    "http://localhost:8000",
+    "http://localhost:8012",
+    "http://127.0.0.1:8000",
+]
+
 app = Starlette(
     routes=routes,
     lifespan=lifespan,
-    middleware=[Middleware(GZipMiddleware, minimum_size=600)],
+    exception_handlers={404: _not_found, 500: _server_error},
+    middleware=[
+        Middleware(LoggingMiddleware),
+        Middleware(RateLimitMiddleware),
+        Middleware(SessionMiddleware),
+        Middleware(CORSMiddleware,
+                   allow_origins=_ALLOWED_ORIGINS,
+                   allow_methods=["GET", "POST"],
+                   allow_headers=["Content-Type", "X-DropHound-Secret"],
+                   allow_credentials=True),
+        Middleware(GZipMiddleware, minimum_size=600),
+    ],
 )
