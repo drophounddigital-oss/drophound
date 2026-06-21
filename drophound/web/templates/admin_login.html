@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Admin — DropHound</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <main class="container" style="max-width:400px;padding-top:80px">
+    <div class="card" style="padding:32px">
+      <h1 style="margin-bottom:8px">Admin</h1>
+      {% if error %}
+      <div class="banner banner-err" style="margin-bottom:16px">Wrong key.</div>
+      {% endif %}
+      <form method="post" action="/admin">
+        <label class="field-label" for="key">Admin key</label>
+        <input id="key" type="password" name="key" autofocus required
+               style="width:100%;padding:10px 14px;border:1px solid var(--line-strong);
+                      border-radius:var(--r);font-size:.95rem;margin:6px 0 16px;
+                      font-family:var(--sans);background:var(--surface);color:var(--ink)" />
+        <button class="btn full-width" type="submit">Enter</button>
+      </form>
+    </div>
+  </main>
+</body>
+</html>

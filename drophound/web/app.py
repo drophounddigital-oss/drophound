@@ -996,21 +996,32 @@ async def _server_error(request: Request, exc: Exception) -> Response:
         conn.close()
 
 
-def _admin_check(request: Request) -> str | None:
+def _admin_check(request: Request, form=None) -> str | None:
     """Return the admin key from query/form, or None if missing/wrong."""
     settings = get_settings()
     if not settings.admin_secret:
         return None
-    key = request.query_params.get("key") or ""
-    if not hmac.compare_digest(key, settings.admin_secret):
+    key = (form.get("key") if form else None) or request.query_params.get("key") or ""
+    if not hmac.compare_digest(key.strip(), settings.admin_secret.strip()):
         return None
-    return key
+    return key.strip()
 
 
 async def admin_page(request: Request):
-    key = _admin_check(request)
+    settings = get_settings()
+    if request.method == "POST":
+        form = await request.form()
+        key = _admin_check(request, form)
+    else:
+        form = None
+        key = _admin_check(request)
+
     if not key:
-        return PlainTextResponse("Forbidden", status_code=403)
+        # Show login form if no/wrong key
+        return templates.TemplateResponse(request, "admin_login.html",
+            {"error": bool(request.query_params.get("key") or (form and form.get("key")))},
+            status_code=403 if (request.query_params.get("key") or (form and form.get("key"))) else 200)
+
     conn = open_conn()
     try:
         users_raw = db.q(conn, """
@@ -1032,26 +1043,38 @@ async def admin_page(request: Request):
 
 async def admin_delete_user(request: Request):
     form = await request.form()
-    key = form.get("key") or ""
-    settings = get_settings()
-    if not settings.admin_secret or not hmac.compare_digest(key, settings.admin_secret):
+    key = _admin_check(request, form)
+    if not key:
         return PlainTextResponse("Forbidden", status_code=403)
     if _bad_csrf(request, form):
         return PlainTextResponse("Invalid CSRF token", status_code=403)
     email = sanitize_str(form.get("email") or "", 320).lower()
     if not email or "@" not in email:
-        return RedirectResponse(f"/admin?key={key}&msg=Invalid+email", status_code=303)
+        return templates.TemplateResponse(request, "admin_login.html", {"error": True}, status_code=400)
     conn = open_conn()
     try:
         sub = get_subscriber(conn, email)
         if not sub:
-            return RedirectResponse(f"/admin?key={key}&msg=User+not+found", status_code=303)
+            return PlainTextResponse("User not found", status_code=404)
         db.execute(conn, "DELETE FROM watchlist WHERE subscriber_id=?", (sub["id"],))
         db.execute(conn, "DELETE FROM collection_items WHERE subscriber_id=?", (sub["id"],))
         db.execute(conn, "DELETE FROM subscribers WHERE id=?", (sub["id"],))
         firebase_db.log_event(email, "admin_deleted", detail=f"by_admin ip={_client_ip(request)}")
         firebase_db.delete_user(email)
-        return RedirectResponse(f"/admin?key={key}&msg=Deleted+{email}", status_code=303)
+        # Re-render admin page directly so the key stays in POST, not URL
+        users_raw = db.q(conn, """
+            SELECT s.*, (SELECT COUNT(*) FROM watchlist w WHERE w.subscriber_id=s.id) AS watch_count
+            FROM subscribers s ORDER BY s.created_at DESC
+        """)
+        users = [dict(u) for u in users_raw]
+        total = len(users)
+        premium = sum(1 for u in users if u["tier"] == "premium")
+        return templates.TemplateResponse(request, "admin.html", {
+            "users": users, "total": total, "premium": premium,
+            "free": total - premium, "key": key,
+            "csrf_token": _csrf(request),
+            "message": f"Deleted {email}",
+        })
     finally:
         conn.close()
 
@@ -1149,7 +1172,7 @@ routes = [
     Route("/api/collection/{subscriber_id:int}/value", api_collection_value),
     Route("/privacy", privacy_page),
     Route("/terms", terms_page),
-    Route("/admin", admin_page),
+    Route("/admin", admin_page, methods=["GET", "POST"]),
     Route("/admin/delete-user", admin_delete_user, methods=["POST"]),
     Mount("/static", app=StaticFiles(directory=str(STATIC_DIR)), name="static"),
 ]
