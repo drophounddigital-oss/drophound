@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Your dashboard — DropHound{% endblock %}
+{% block title %}Your dashboard | DropHound{% endblock %}
 {% block description %}Filtered restock alerts, eBay resale tracking and predicted restock windows for the characters you collect.{% endblock %}
 {% block content %}
 
@@ -72,7 +72,7 @@
           <td>{{ m.name }}</td>
           <td class="num">{{ m.median | money }}</td>
           <td class="num {{ 'up' if m.trend_pct >= 0 else 'down' }}">{{ m.trend_pct | pct }}</td>
-          <td class="num">{% if m.multiple %}{{ m.multiple }}x{% else %}—{% endif %}</td>
+          <td class="num">{% if m.multiple %}{{ m.multiple }}x{% else %}-{% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>

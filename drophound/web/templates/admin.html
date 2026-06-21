@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Admin — DropHound</title>
+  <title>Admin | DropHound</title>
   <meta name="robots" content="noindex, nofollow" />
   <link rel="stylesheet" href="/static/styles.css" />
   <style>
@@ -68,9 +68,9 @@
           <tr class="user-row">
             <td>{{ u.email }}</td>
             <td><span class="tag-{{ u.tier }}">{{ u.tier }}</span></td>
-            <td class="muted">{{ u.created_at[:10] if u.created_at else '—' }}</td>
+            <td class="muted">{{ u.created_at[:10] if u.created_at else '-' }}</td>
             <td class="muted">{{ u.watch_count }}</td>
-            <td class="muted" style="font-size:.78rem">{{ u.stripe_customer_id or '—' }}</td>
+            <td class="muted" style="font-size:.78rem">{{ u.stripe_customer_id or '-' }}</td>
             <td>
               <form action="/admin/delete-user" method="post"
                     onsubmit="return confirm('Delete {{ u.email }}? This cannot be undone.')">

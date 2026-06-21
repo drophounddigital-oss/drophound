@@ -6,8 +6,8 @@
   <meta name="google-site-verification" content="eh4iVDJYS85Oih-3S83isCgToRfaxGLPkgq17XQ_YJA" />
   {% set base = (site.base_url if site and site.base_url else '') %}
   {% set canonical = base ~ request.url.path %}
-  {% set meta_title %}{% block title %}DropHound — Labubu & Pop Mart restock alerts + resale tracker{% endblock %}{% endset %}
-  {% set meta_desc %}{% block description %}Real-time restock alerts and resale-price tracking for blind-box collectors — Labubu, Pop Mart, Skullpanda, Sonny Angel, Smiski. Never miss a drop.{% endblock %}{% endset %}
+  {% set meta_title %}{% block title %}DropHound: Labubu & Pop Mart restock alerts + resale tracker{% endblock %}{% endset %}
+  {% set meta_desc %}{% block description %}Real-time restock alerts and resale-price tracking for blind-box collectors: Labubu, Pop Mart, Skullpanda, Sonny Angel, Smiski. Never miss a drop.{% endblock %}{% endset %}
   <title>{{ meta_title | trim }}</title>
   <meta name="description" content="{{ meta_desc | trim }}" />
   <meta name="robots" content="index, follow" />
@@ -64,7 +64,7 @@
   <header class="nav">
     <a class="brand" href="/">
       <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2C12 2 4 11 4 16a8 8 0 0 0 16 0c0-5-8-14-8-14z" fill="currentColor"/></svg>
-      Drop<span class="brand-accent">Hound</span>
+      <span>Drop<span class="brand-accent">Hound</span></span>
     </a>
     <nav class="nav-links">
       <a href="/watch">Browse</a>
@@ -96,7 +96,7 @@
 
   <footer class="footer">
     <div>
-      <strong>DropHound</strong> — drop tracking &amp; resale intelligence for blind-box collectors.
+      <strong>DropHound</strong>: drop tracking &amp; resale intelligence for blind-box collectors.
     </div>
     <div class="footer-sub">
       Resale figures are illustrative and not financial advice. ·

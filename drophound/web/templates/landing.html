@@ -2,7 +2,7 @@
 {% block content %}
 
 {% if subscribed %}
-<div class="banner banner-ok">You're on the list. Watch your inbox — and grab faster, filtered alerts on <a href="/pricing">Premium</a>.</div>
+<div class="banner banner-ok">You're on the list. Watch your inbox and grab faster, filtered alerts on <a href="/pricing">Premium</a>.</div>
 {% endif %}
 {% if error %}
 <div class="banner banner-err">That email didn't look right. Mind trying again?</div>
@@ -10,11 +10,11 @@
 
 <section class="hero">
   <div class="hero-copy">
-    <span class="pill">● Live — {{ site.alerts_24h }} alerts in the last 24h</span>
+    <span class="pill">● Live: {{ site.alerts_24h }} alerts in the last 24h</span>
     <h1>Never miss a drop again.</h1>
     <p class="lede">
       Real-time restock alerts and resale intelligence for blind-box collectors.
-      Labubu, Molly, Skullpanda, Crybaby, Sonny Angel, Smiski — the second they
+      Labubu, Molly, Skullpanda, Crybaby, Sonny Angel, Smiski. The second they
       drop or restock, you know. Before they sell out.
     </p>
 
@@ -49,7 +49,7 @@
       {% endfor %}
     </ul>
     {% else %}
-    <p class="empty">No drops yet — run the engine to populate the feed.</p>
+    <p class="empty">No drops yet. Run the engine to populate the feed.</p>
     {% endif %}
   </aside>
 </section>
@@ -60,7 +60,7 @@
     <div class="card layer">
       <span class="layer-tag">Free</span>
       <h3>Instant alerts</h3>
-      <p>Public Telegram, Discord and email the moment a watched product drops, restocks, or sees a price move. Fast, useful, free — this is the funnel.</p>
+      <p>Public Telegram, Discord and email the moment a watched product drops, restocks, or sees a price move. Fast, useful, free. This is the funnel.</p>
     </div>
     <div class="card layer">
       <span class="layer-tag tag-pro">Premium · ${{ '%.0f'|format(site.premium_price) }}/mo</span>
@@ -70,7 +70,7 @@
     <div class="card layer">
       <span class="layer-tag tag-aff">Affiliate</span>
       <h3>Built-in margin</h3>
-      <p>Every buy and resale link routes through affiliate programs. Traffic monetizes whether or not someone subscribes — plus brand sponsorships in the digest.</p>
+      <p>Every buy and resale link routes through affiliate programs. Traffic monetizes whether or not someone subscribes, plus brand sponsorships in the digest.</p>
     </div>
   </div>
 </section>
