@@ -16,6 +16,13 @@
 
     {% if tab == "register" %}
     <form action="/register" method="post" class="auth-form" novalidate>
+      <input type="hidden" name="_csrf" value="{{ site.csrf_token }}" />
+      <!-- honeypot: must stay empty; bots fill all fields -->
+      <div style="display:none" aria-hidden="true">
+        <label for="r-website">Website</label>
+        <input id="r-website" type="text" name="website" tabindex="-1" autocomplete="off" />
+      </div>
+
       <h1 class="auth-title">Create your free account</h1>
       <p class="muted auth-sub">Get alerts the moment watched drops restock.</p>
 
@@ -30,11 +37,15 @@
 
       <button class="btn full-width" type="submit">Create account</button>
 
+      <p class="auth-switch micro">By signing up you agree to our
+        <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>.</p>
       <p class="auth-switch">Already have an account? <a href="/login">Log in →</a></p>
     </form>
 
     {% else %}
     <form action="/login" method="post" class="auth-form" novalidate>
+      <input type="hidden" name="_csrf" value="{{ site.csrf_token }}" />
+
       <h1 class="auth-title">Welcome back</h1>
       <p class="muted auth-sub">Log in to manage your watchlist and alerts.</p>
 

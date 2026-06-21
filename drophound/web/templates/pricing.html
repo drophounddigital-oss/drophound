@@ -44,6 +44,7 @@
     </ul>
     {% if site.current_user %}
     <form action="/upgrade" method="post" class="upgrade-form">
+      <input type="hidden" name="_csrf" value="{{ site.csrf_token }}" />
       <button class="btn block" type="submit">
         {% if stripe_enabled %}Subscribe — ${{ '%.0f'|format(site.premium_price) }}/mo{% else %}Upgrade (demo){% endif %}
       </button>

@@ -41,6 +41,20 @@ def _load_dotenv() -> None:
         os.environ.setdefault(key, value)
 
 
+import hashlib as _hashlib
+import secrets as _secrets
+
+_PROC_CSRF_SECRET: str | None = None
+
+
+def _derive_csrf_secret() -> str:
+    """Generate a stable-per-process CSRF secret (random on first call)."""
+    global _PROC_CSRF_SECRET
+    if _PROC_CSRF_SECRET is None:
+        _PROC_CSRF_SECRET = _secrets.token_hex(32)
+    return _PROC_CSRF_SECRET
+
+
 def _get(name: str, default: str | None = None) -> str | None:
     val = os.environ.get(name)
     return val if val not in (None, "") else default
@@ -78,6 +92,14 @@ class Settings:
     # Shared secret protecting the inbound /hook/restock webhook
     hook_secret: str | None
 
+    # CSRF — derived per-process if not set; set this in env for stable tokens
+    # across rolling restarts (32-hex string recommended)
+    csrf_secret: str
+
+    # Firebase Firestore (optional) — paste the service-account JSON string
+    firebase_credentials_json: str | None
+    firebase_project_id: str | None
+
     @property
     def has_anthropic(self) -> bool:
         return bool(self.anthropic_api_key)
@@ -112,4 +134,7 @@ def get_settings() -> Settings:
         stripe_webhook_secret=_get("STRIPE_WEBHOOK_SECRET"),
         anthropic_api_key=_get("ANTHROPIC_API_KEY"),
         hook_secret=_get("DROPHOUND_HOOK_SECRET"),
+        csrf_secret=_get("DROPHOUND_CSRF_SECRET") or _derive_csrf_secret(),
+        firebase_credentials_json=_get("FIREBASE_CREDENTIALS_JSON"),
+        firebase_project_id=_get("FIREBASE_PROJECT_ID"),
     )

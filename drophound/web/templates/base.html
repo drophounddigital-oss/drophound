@@ -32,6 +32,9 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2C12 2 4 11 4 16a8 8 0 0 0 16 0c0-5-8-14-8-14z' fill='%235b4df0'/></svg>" />
   <link rel="stylesheet" href="/static/styles.css" />
+  {% if site and site.csrf_token %}
+  <meta name="csrf-token" content="{{ site.csrf_token }}" />
+  {% endif %}
 
   <script type="application/ld+json">
   {
@@ -75,6 +78,7 @@
         {{ site.current_user.email[0].upper() }}
       </span>
       <form action="/logout" method="post" style="display:inline">
+        <input type="hidden" name="_csrf" value="{{ site.csrf_token if site else '' }}" />
         <button class="btn btn-sm btn-ghost" type="submit">Log out</button>
       </form>
     </div>
@@ -95,9 +99,30 @@
       <strong>DropHound</strong> — drop tracking &amp; resale intelligence for blind-box collectors.
     </div>
     <div class="footer-sub">
-      Alerts run in dry-run mode until channels are configured · resale figures are illustrative.
+      Resale figures are illustrative and not financial advice. ·
+      <a href="/privacy">Privacy Policy</a> ·
+      <a href="/terms">Terms of Service</a>
     </div>
   </footer>
+
+  <!-- Cookie consent banner -->
+  <div id="cookie-banner" class="cookie-banner" hidden>
+    <p>We use a session cookie to keep you logged in. No tracking or ad cookies.
+       <a href="/privacy">Learn more</a>.</p>
+    <button class="btn btn-sm" onclick="acceptCookies()">Got it</button>
+  </div>
+
   <script src="/static/app.js" defer></script>
+  <script>
+    (function(){
+      if (!localStorage.getItem('dh_cookie_ok')) {
+        document.getElementById('cookie-banner').hidden = false;
+      }
+    })();
+    function acceptCookies() {
+      localStorage.setItem('dh_cookie_ok', '1');
+      document.getElementById('cookie-banner').hidden = true;
+    }
+  </script>
 </body>
 </html>

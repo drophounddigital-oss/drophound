@@ -355,3 +355,22 @@ table.data tr:last-child td { border-bottom: none; }
 .auth-nudge { display: flex; align-items: center; justify-content: space-between; gap: 16px;
   padding: 16px 20px; margin-bottom: 20px; flex-wrap: wrap; }
 .auth-nudge-btns { display: flex; gap: 8px; flex-shrink: 0; }
+
+/* ---- Cookie consent banner -------------------------------------------- */
+.cookie-banner {
+  position: fixed; bottom: 0; left: 0; right: 0; z-index: 100;
+  background: var(--ink); color: #fff;
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  padding: 14px 32px; font-size: .85rem; flex-wrap: wrap;
+}
+.cookie-banner p { margin: 0; opacity: .9; }
+.cookie-banner a { color: #a89ef5; text-decoration: underline; }
+.cookie-banner .btn { background: #fff; color: var(--ink); border-color: #fff;
+  font-size: .82rem; padding: 7px 14px; white-space: nowrap; flex-shrink: 0; }
+
+/* ---- Legal pages (privacy / terms) ------------------------------------ */
+.legal-body { max-width: 720px; margin: 0 auto; }
+.legal-body h2 { margin-top: 2em; font-size: 1.15rem; }
+.legal-body p, .legal-body li { color: var(--ink-2); line-height: 1.8; }
+.legal-body ul { padding-left: 1.4em; }
+.legal-updated { font-size: .8rem; color: var(--muted); margin-bottom: 2em; }

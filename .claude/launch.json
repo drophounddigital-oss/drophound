@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "drophound",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["-m", "drophound", "serve", "--host", "127.0.0.1", "--port", "8012"],
+      "port": 8012
+    }
+  ]
+}

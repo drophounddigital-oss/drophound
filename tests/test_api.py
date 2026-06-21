@@ -1,4 +1,5 @@
 from drophound import db
+from tests.conftest import csrf
 
 
 def test_health(client):
@@ -15,7 +16,8 @@ def test_landing_renders(client):
 
 
 def test_subscribe_creates_free_subscriber(client, conn):
-    r = client.post("/subscribe", data={"email": "newbie@example.com"})
+    tok = csrf(client)
+    r = client.post("/subscribe", data={"email": "newbie@example.com", "_csrf": tok})
     assert r.status_code == 200  # followed redirect back to landing
     assert "list" in r.text.lower()
     row = db.one(conn, "SELECT * FROM subscribers WHERE email=?", ("newbie@example.com",))
@@ -23,8 +25,8 @@ def test_subscribe_creates_free_subscriber(client, conn):
 
 
 def test_subscribe_rejects_bad_email(client, conn):
-    client.get("/")  # warm
-    r = client.post("/subscribe", data={"email": "not-an-email"})
+    tok = csrf(client)
+    r = client.post("/subscribe", data={"email": "not-an-email", "_csrf": tok})
     assert r.status_code == 200
     assert db.one(conn, "SELECT * FROM subscribers WHERE email=?", ("not-an-email",)) is None
 
@@ -40,7 +42,9 @@ def test_dashboard_and_collection(client):
     assert client.get("/app", follow_redirects=False).status_code == 303
     assert client.get("/collection", follow_redirects=False).status_code == 303
     # After registering, dashboard loads and shows the user's email
-    client.post("/register", data={"email": "dash@example.com", "password": "password123"})
+    tok = csrf(client)
+    client.post("/register", data={"email": "dash@example.com", "password": "password123",
+                                   "_csrf": tok})
     assert "dash@example.com" in client.get("/app").text
     assert "Cost basis" in client.get("/collection").text
 
@@ -112,23 +116,26 @@ def test_watch_page_renders(client):
 
 def test_watch_add_list_remove(client, conn):
     pid = client.get("/api/products").json()["products"][0]["id"]
+    tok = csrf(client)
     # Register an account; the TestClient preserves the session cookie automatically.
-    client.post("/register", data={"email": "picker@example.com", "password": "password123"})
-    add = client.post("/watch/add", data={"product_id": pid}).json()
+    client.post("/register", data={"email": "picker@example.com", "password": "password123",
+                                   "_csrf": tok})
+    add = client.post("/watch/add", data={"product_id": pid, "_csrf": tok}).json()
     assert add["watched"] is True and add["count"] == 1
     # idempotent: adding again stays at 1
-    again = client.post("/watch/add", data={"product_id": pid}).json()
+    again = client.post("/watch/add", data={"product_id": pid, "_csrf": tok}).json()
     assert again["count"] == 1
     assert client.get("/api/catalog").json()["watch_count"] == 1
-    rem = client.post("/watch/remove", data={"product_id": pid}).json()
+    rem = client.post("/watch/remove", data={"product_id": pid, "_csrf": tok}).json()
     assert rem["watched"] is False and rem["count"] == 0
     assert db.one(conn, "SELECT tier FROM subscribers WHERE email=?",
                   ("picker@example.com",))["tier"] == "free"
 
 
 def test_watch_requires_login(client):
-    # Not logged in: watch/add returns 401 with login_required flag
-    r = client.post("/watch/add", data={"product_id": "1"})
+    tok = csrf(client)
+    # CSRF is valid but not logged in: watch/add returns 401 with login_required flag
+    r = client.post("/watch/add", data={"product_id": "1", "_csrf": tok})
     assert r.status_code == 401
     assert r.json().get("login_required") is True
 

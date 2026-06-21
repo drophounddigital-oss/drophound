@@ -1,9 +1,10 @@
 # DropHound runtime + dev dependencies.
-# Deliberately a small, pure-Python surface (no compiled deps) so it installs
-# cleanly on any Python 3.10+ including 3.14, with no Rust/C toolchain.
 starlette>=1.3,<2
 uvicorn>=0.49
 jinja2>=3.1
 httpx>=0.28
 python-multipart>=0.0.32
 pytest>=8
+# Firebase Admin SDK — optional but required for Firestore user data sync.
+# Set FIREBASE_CREDENTIALS_JSON env var to activate; app boots fine without it.
+firebase-admin>=6.5

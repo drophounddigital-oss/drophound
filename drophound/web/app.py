@@ -26,13 +26,20 @@ from starlette.routing import Mount, Route
 from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
-from .. import affiliates, billing, cache, db, filters
+from .. import affiliates, billing, cache, db, filters, firebase_db
 from ..config import STATIC_DIR, TEMPLATES_DIR, get_settings
 from ..engine import digest as digest_mod
 from ..engine import pipeline
 from ..engine import resale
 from ..engine.alerts import AlertMessage, broadcast_dispatchers
-from ..middleware import LoggingMiddleware, RateLimitMiddleware, SessionMiddleware, get_session_id
+from ..middleware import (  # noqa: F401 — imported for Middleware() registration
+    LoggingMiddleware, RateLimitMiddleware, SessionMiddleware, get_session_id,
+)
+from ..security import (
+    CSRF_FIELD, CSRF_HEADER, SecurityHeadersMiddleware,
+    clear_failures, csrf_token, is_bot_submission, is_locked,
+    record_failure, verify_csrf,
+)
 from ..stats import premium_multiple, trend_pct
 from ..util import humanize_age, money, now_utc, parse_iso
 from ..validation import (
@@ -42,6 +49,24 @@ from ..validation import (
 logger = logging.getLogger("drophound")
 
 DEMO_EMAIL = "demo@drophound.app"
+
+
+def _csrf(request: Request) -> str:
+    """Return the CSRF token for the current session."""
+    return csrf_token(get_session_id(request), get_settings().csrf_secret)
+
+
+def _bad_csrf(request: Request, form) -> bool:
+    """Return True if the CSRF token in the submitted form/header is invalid."""
+    token = form.get(CSRF_FIELD) or request.headers.get(CSRF_HEADER, "")
+    return not verify_csrf(token, get_session_id(request), get_settings().csrf_secret)
+
+
+def _client_ip(request: Request) -> str:
+    return (
+        request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+        or (request.client.host if request.client else "unknown")
+    )
 
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.filters["money"] = lambda v: money(v)
@@ -208,6 +233,7 @@ def site_context(conn: sqlite3.Connection, request: Request | None = None) -> di
     }
     if request is not None:
         ctx["current_user"] = get_current_user(conn, request)
+        ctx["csrf_token"] = _csrf(request)
     return ctx
 
 
@@ -233,6 +259,8 @@ async def landing(request: Request):
 
 async def subscribe(request: Request):
     form = await request.form()
+    if is_bot_submission(form) or _bad_csrf(request, form):
+        return RedirectResponse("/?subscribed=1#join", status_code=303)  # silent drop
     telegram = sanitize_str(form.get("telegram") or "", 64) or None
     try:
         email = validate_email(form.get("email") or "")
@@ -248,6 +276,8 @@ async def subscribe(request: Request):
                    VALUES (?, 'free', ?, ?)""",
                 (email, telegram, now_utc().isoformat()),
             )
+            firebase_db.upsert_user(email, {"email": email, "tier": "free",
+                                            "created_at": now_utc().isoformat()})
         return RedirectResponse("/?subscribed=1#join", status_code=303)
     finally:
         conn.close()
@@ -325,6 +355,9 @@ async def pricing(request: Request):
 
 
 async def upgrade(request: Request):
+    form = await request.form()
+    if _bad_csrf(request, form):
+        return RedirectResponse("/pricing?error=1", status_code=303)
     settings = get_settings()
     conn = open_conn()
     try:
@@ -338,6 +371,7 @@ async def upgrade(request: Request):
             try:
                 url, _ = billing.create_checkout_session(settings, email)
                 if url:
+                    firebase_db.log_event(email, "checkout_started", ip=_client_ip(request))
                     return RedirectResponse(url, status_code=303)
             except Exception:
                 pass
@@ -347,6 +381,8 @@ async def upgrade(request: Request):
         db.execute(conn,
             "UPDATE subscribers SET tier='premium', premium_since=? WHERE id=?",
             (now_utc().isoformat(), sub["id"]))
+        firebase_db.upsert_user(email, {"tier": "premium",
+                                        "premium_since": now_utc().isoformat()})
         return RedirectResponse("/pricing?upgraded=1", status_code=303)
     finally:
         conn.close()
@@ -385,11 +421,23 @@ async def stripe_webhook(request: Request):
                            stripe_customer_id=? WHERE id=?""",
                         (now_utc().isoformat(), obj.get("customer"), sub["id"]),
                     )
+                    firebase_db.upsert_user(email, {
+                        "tier": "premium",
+                        "premium_since": now_utc().isoformat(),
+                        "stripe_customer_id": obj.get("customer"),
+                    })
+                    firebase_db.log_event(email, "payment_success",
+                                          detail=f"stripe_session={obj.get('id')}")
         elif etype == "customer.subscription.deleted":
             customer = obj.get("customer")
             if customer:
                 db.execute(conn, "UPDATE subscribers SET tier='free' WHERE stripe_customer_id=?",
                            (customer,))
+                sub_row = db.one(conn, "SELECT email FROM subscribers WHERE stripe_customer_id=?",
+                                 (customer,))
+                if sub_row:
+                    firebase_db.upsert_user(sub_row["email"], {"tier": "free"})
+                    firebase_db.log_event(sub_row["email"], "subscription_cancelled")
         return JSONResponse({"received": True})
     finally:
         conn.close()
@@ -671,6 +719,10 @@ async def register_page(request: Request):
     try:
         if request.method == "POST":
             form = await request.form()
+            if is_bot_submission(form) or _bad_csrf(request, form):
+                return RedirectResponse("/register?next=" +
+                    sanitize_str(request.query_params.get("next") or "/watch", 200),
+                    status_code=303)
             try:
                 email = validate_email(form.get("email") or "")
             except ValueError as exc:
@@ -700,6 +752,10 @@ async def register_page(request: Request):
                     """INSERT INTO subscribers (email, tier, created_at, session_id, password_hash)
                        VALUES (?, 'free', ?, ?, ?)""",
                     (email, now_utc().isoformat(), sid, pw_hash))
+            firebase_db.upsert_user(email, {"email": email, "tier": "free",
+                                            "created_at": now_utc().isoformat()})
+            firebase_db.log_event(email, "register", ip=_client_ip(request),
+                                  user_agent=request.headers.get("user-agent"))
             next_url = sanitize_str(request.query_params.get("next") or "/watch", 200)
             if not next_url.startswith("/"):
                 next_url = "/watch"
@@ -715,21 +771,39 @@ async def login_page(request: Request):
     try:
         if request.method == "POST":
             form = await request.form()
+            if _bad_csrf(request, form):
+                return templates.TemplateResponse(request, "login.html",
+                    {"site": site_context(conn, request),
+                     "error": "Session expired. Please try again.", "tab": "login"},
+                    status_code=403)
             try:
                 email = validate_email(form.get("email") or "")
             except ValueError as exc:
                 return templates.TemplateResponse(request, "login.html",
                     {"site": site_context(conn, request), "error": str(exc), "tab": "login"},
                     status_code=400)
+
+            if is_locked(email):
+                firebase_db.log_event(email, "login_blocked", ip=_client_ip(request))
+                return templates.TemplateResponse(request, "login.html",
+                    {"site": site_context(conn, request),
+                     "error": "Too many failed attempts. Try again in 15 minutes.",
+                     "tab": "login"}, status_code=429)
+
             password = form.get("password") or ""
             sub = get_subscriber(conn, email)
             pw_hash = (sub["password_hash"] if sub and "password_hash" in sub.keys() else None)
             if not sub or not pw_hash or not verify_password(password, pw_hash):
+                record_failure(email)
+                firebase_db.log_event(email, "login_failed", ip=_client_ip(request))
                 return templates.TemplateResponse(request, "login.html",
                     {"site": site_context(conn, request),
                      "error": "Incorrect email or password.", "tab": "login"}, status_code=400)
+
+            clear_failures(email)
             sid = get_session_id(request)
             db.execute(conn, "UPDATE subscribers SET session_id=? WHERE id=?", (sid, sub["id"]))
+            firebase_db.log_event(email, "login_success", ip=_client_ip(request))
             next_url = sanitize_str(request.query_params.get("next") or "/watch", 200)
             if not next_url.startswith("/"):
                 next_url = "/watch"
@@ -741,12 +815,16 @@ async def login_page(request: Request):
 
 
 async def logout(request: Request):
+    form = await request.form()
+    if _bad_csrf(request, form):
+        return RedirectResponse("/", status_code=303)
     conn = open_conn()
     try:
         sid = get_session_id(request)
-        sub = db.one(conn, "SELECT id FROM subscribers WHERE session_id=?", (sid,))
+        sub = db.one(conn, "SELECT * FROM subscribers WHERE session_id=?", (sid,))
         if sub:
             db.execute(conn, "UPDATE subscribers SET session_id=NULL WHERE id=?", (sub["id"],))
+            firebase_db.log_event(sub["email"], "logout", ip=_client_ip(request))
         response = RedirectResponse("/login", status_code=303)
         response.delete_cookie("dh_sid")
         return response
@@ -801,12 +879,12 @@ async def api_catalog(request: Request):
 
 
 async def api_watchlist(request: Request):
-    email = (request.query_params.get("email") or "").strip().lower()
     conn = open_conn()
     try:
-        sub = get_subscriber(conn, email) if "@" in email else None
+        sub = get_current_user(conn, request)
         if not sub:
-            return JSONResponse({"products": [], "count": 0})
+            return JSONResponse({"error": "Authentication required.", "login_required": True},
+                                status_code=401)
         rows = db.q(conn, f"""SELECT p.id, p.name, p.brand, p.character, p.retailer, p.region,
             p.retail_price, p.image_hint, {_STATUS_SUB} AS status, {_RESALE_SUB} AS resale_median,
             {_RESALE_LOW} AS resale_low, {_RESALE_HIGH} AS resale_high
@@ -820,6 +898,8 @@ async def api_watchlist(request: Request):
 
 async def watch_add(request: Request):
     form = await request.form()
+    if _bad_csrf(request, form):
+        return JSONResponse({"error": "Invalid CSRF token."}, status_code=403)
     try:
         pid = int(form.get("product_id") or 0)
         if pid <= 0:
@@ -850,6 +930,8 @@ async def watch_add(request: Request):
 
 async def watch_remove(request: Request):
     form = await request.form()
+    if _bad_csrf(request, form):
+        return JSONResponse({"error": "Invalid CSRF token."}, status_code=403)
     try:
         pid = int(form.get("product_id") or 0)
         if pid <= 0:
@@ -907,20 +989,62 @@ async def _server_error(request: Request, exc: Exception) -> Response:
         conn.close()
 
 
+async def privacy_page(request: Request):
+    conn = open_conn()
+    try:
+        return templates.TemplateResponse(
+            request, "privacy.html", {"site": site_context(conn, request)})
+    finally:
+        conn.close()
+
+
+async def terms_page(request: Request):
+    conn = open_conn()
+    try:
+        return templates.TemplateResponse(
+            request, "terms.html", {"site": site_context(conn, request)})
+    finally:
+        conn.close()
+
+
+async def delete_account(request: Request):
+    """Allow a logged-in user to permanently delete their account (GDPR Art. 17)."""
+    form = await request.form()
+    if _bad_csrf(request, form):
+        return JSONResponse({"error": "Invalid CSRF token."}, status_code=403)
+    conn = open_conn()
+    try:
+        sub = get_current_user(conn, request)
+        if not sub:
+            return JSONResponse({"error": "Not authenticated."}, status_code=401)
+        email = sub["email"]
+        db.execute(conn, "DELETE FROM watchlist WHERE subscriber_id=?", (sub["id"],))
+        db.execute(conn, "DELETE FROM collection_items WHERE subscriber_id=?", (sub["id"],))
+        db.execute(conn, "DELETE FROM subscribers WHERE id=?", (sub["id"],))
+        firebase_db.log_event(email, "account_deleted", ip=_client_ip(request))
+        firebase_db.delete_user(email)
+        response = RedirectResponse("/", status_code=303)
+        response.delete_cookie("dh_sid")
+        return response
+    finally:
+        conn.close()
+
+
 @asynccontextmanager
 async def lifespan(app):
-    # Configure logging on startup
     logging.basicConfig(
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s %(message)s",
         datefmt="%Y-%m-%dT%H:%M:%SZ",
     )
+    settings = get_settings()
+    firebase_db.init(settings.firebase_credentials_json, settings.firebase_project_id)
     conn = open_conn()
     try:
         db.init_db(conn)
         if db.one(conn, "SELECT COUNT(*) c FROM products")["c"] == 0:
             from .. import seed as seed_mod
-            seed_mod.seed(conn, get_settings())
+            seed_mod.seed(conn, settings)
     finally:
         conn.close()
     logger.info("drophound started")
@@ -937,6 +1061,7 @@ routes = [
     Route("/watch", watch_page),
     Route("/watch/add", watch_add, methods=["POST"]),
     Route("/watch/remove", watch_remove, methods=["POST"]),
+    Route("/account/delete", delete_account, methods=["POST"]),
     Route("/api/catalog", api_catalog),
     Route("/api/watchlist", api_watchlist),
     Route("/drops", drops_page),
@@ -955,6 +1080,8 @@ routes = [
     Route("/api/drops", api_drops),
     Route("/api/products", api_products),
     Route("/api/collection/{subscriber_id:int}/value", api_collection_value),
+    Route("/privacy", privacy_page),
+    Route("/terms", terms_page),
     Mount("/static", app=StaticFiles(directory=str(STATIC_DIR)), name="static"),
 ]
 
@@ -972,6 +1099,7 @@ app = Starlette(
     exception_handlers={404: _not_found, 500: _server_error},
     middleware=[
         Middleware(LoggingMiddleware),
+        Middleware(SecurityHeadersMiddleware),
         Middleware(RateLimitMiddleware),
         Middleware(SessionMiddleware),
         Middleware(CORSMiddleware,

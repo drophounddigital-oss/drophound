@@ -1,0 +1,40 @@
+// DropHound — Firestore Security Rules
+// Deploy via: firebase deploy --only firestore:rules
+//
+// Data layout:
+//   users/{email}/               — user profile document
+//   users/{email}/security_events/{id}  — audit log (server-write only)
+//
+// Access model:
+//   - All writes come from the server via the Admin SDK (bypasses these rules).
+//   - No client-side SDK is used, so these rules block all direct client access.
+//   - This is the safest default: zero client-side attack surface.
+
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Block all direct client reads and writes.
+    // The server uses the Admin SDK which bypasses these rules.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // If you add client-side Firebase Auth in the future, replace the above
+    // with per-user rules like:
+    //
+    // match /users/{email} {
+    //   allow read, update: if request.auth != null
+    //                       && request.auth.token.email == email
+    //                       && request.auth.token.email_verified == true;
+    //   allow create, delete: if false;  // server-only
+    // }
+    //
+    // match /users/{email}/security_events/{eventId} {
+    //   allow read: if request.auth != null
+    //               && request.auth.token.email == email
+    //               && request.auth.token.email_verified == true;
+    //   allow write: if false;  // server-only
+    // }
+  }
+}

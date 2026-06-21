@@ -1,5 +1,9 @@
 // DropHound progressive enhancement — app works fully without JS.
 
+function getCsrfToken() {
+  return document.querySelector('meta[name="csrf-token"]')?.content || "";
+}
+
 // --------------------------------------------------------------------------
 // Copy-to-clipboard (digest share captions)
 // --------------------------------------------------------------------------
@@ -114,7 +118,7 @@ document.addEventListener("click", async (e) => {
 
   // --- Send to server (session cookie is sent automatically) ---
   try {
-    const body = new URLSearchParams({ product_id: pid });
+    const body = new URLSearchParams({ product_id: pid, _csrf: getCsrfToken() });
     const res = await fetch(endpoint, { method: "POST", body });
     if (res.status === 401) { location.href = "/login?next=/watch"; return; }
     if (!res.ok) throw new Error(await res.text());

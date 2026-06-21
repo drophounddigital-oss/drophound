@@ -22,6 +22,8 @@ _RATE_WINDOWS: dict[str, deque] = defaultdict(deque)
 # (max_requests, window_seconds) per route prefix
 _LIMITS: list[tuple[str, int, int]] = [
     ("/api/",        60,  60),   # 60 req/min on JSON API
+    ("/login",       10,  60),   # 10 login attempts/min per IP
+    ("/register",    5,   60),   # 5 registrations/min per IP
     ("/subscribe",   5,   60),   # 5 signups/min
     ("/upgrade",     5,   60),   # 5 checkout attempts/min
     ("/watch/add",   30,  60),   # 30 watch toggles/min

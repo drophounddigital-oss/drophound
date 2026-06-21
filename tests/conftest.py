@@ -2,8 +2,17 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 from starlette.testclient import TestClient
+
+
+def csrf(client) -> str:
+    """Return a valid CSRF token for the current session by reading the homepage."""
+    r = client.get("/")
+    m = re.search(r'name="csrf-token"\s+content="([^"]+)"', r.text)
+    return m.group(1) if m else ""
 
 
 # External-channel credentials are blanked so tests are hermetic: every channel

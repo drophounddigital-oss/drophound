@@ -1,6 +1,7 @@
 import json
 
 from drophound import billing, db
+from tests.conftest import csrf
 
 
 class _Resp:
@@ -85,9 +86,11 @@ def test_stripe_webhook_rejects_bad_signature(client):
 
 
 def test_upgrade_demo_flip_without_stripe(client, conn):
+    tok = csrf(client)
     # Register + log in first, then upgrade flips tier for the session user.
-    client.post("/register", data={"email": "demoflip@example.com", "password": "password123"})
-    r = client.post("/upgrade")
+    client.post("/register", data={"email": "demoflip@example.com", "password": "password123",
+                                   "_csrf": tok})
+    r = client.post("/upgrade", data={"_csrf": tok})
     assert r.status_code in (200, 303)
     row = db.one(conn, "SELECT tier FROM subscribers WHERE email='demoflip@example.com'")
     assert row and row["tier"] == "premium"

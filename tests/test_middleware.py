@@ -3,6 +3,7 @@
 import time
 
 from drophound import cache
+from tests.conftest import csrf
 from drophound.validation import (
     make_token, validate_email, sanitize_str, verify_token,
 )
@@ -98,18 +99,21 @@ def test_session_cookie_set(client):
 
 # ---- watchlist auth + input validation ------------------------------------ #
 def test_watch_add_requires_login(client):
-    # No session → 401
-    r = client.post("/watch/add", data={"product_id": "1"})
+    tok = csrf(client)
+    # Valid CSRF but no session → 401
+    r = client.post("/watch/add", data={"product_id": "1", "_csrf": tok})
     assert r.status_code == 401
     assert "error" in r.json()
 
 
 def test_watch_add_bad_pid(client):
-    # Bad product_id → 400 even before session check (pid validated first)
-    r = client.post("/watch/add", data={"product_id": "abc"})
+    tok = csrf(client)
+    # Valid CSRF but bad product_id → 400
+    r = client.post("/watch/add", data={"product_id": "abc", "_csrf": tok})
     assert r.status_code == 400
 
 
 def test_watch_remove_requires_login(client):
-    r = client.post("/watch/remove", data={"product_id": "1"})
+    tok = csrf(client)
+    r = client.post("/watch/remove", data={"product_id": "1", "_csrf": tok})
     assert r.status_code == 401
