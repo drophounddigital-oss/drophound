@@ -803,6 +803,11 @@ async def login_page(request: Request):
             clear_failures(email)
             sid = get_session_id(request)
             db.execute(conn, "UPDATE subscribers SET session_id=? WHERE id=?", (sid, sub["id"]))
+            firebase_db.upsert_user(email, {
+                "email": email,
+                "tier": sub["tier"],
+                "last_login": now_utc().isoformat(),
+            })
             firebase_db.log_event(email, "login_success", ip=_client_ip(request))
             next_url = sanitize_str(request.query_params.get("next") or "/watch", 200)
             if not next_url.startswith("/"):
