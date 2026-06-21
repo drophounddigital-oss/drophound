@@ -1,8 +1,12 @@
 """Layer 3 — affiliate link building.
 
 Outbound clicks route through `/go/{product_id}?to=<target>`, which appends the
-configured affiliate tags and logs the click. This monetizes traffic whether or
-not the visitor ever subscribes.
+configured affiliate tags and logs the click.
+
+Targets:
+  site    → product's own retailer page (stored product_url), character search fallback
+  ebay    → eBay sold/active search (resale discovery)
+  stockx  → StockX search (resale discovery)
 """
 
 from __future__ import annotations
@@ -27,48 +31,70 @@ def _add_params(url: str, params: dict[str, str]) -> str:
     return urlunparse(parsed._replace(query=urlencode(query)))
 
 
+def _retailer_search_url(product: Any) -> str:
+    """Brand-aware search fallback using character name (not full product name)."""
+    brand = (_field(product, "brand") or "").lower()
+    retailer = (_field(product, "retailer") or "").lower()
+    # Character name is short and specific; full product name returns 100+ results.
+    character = _field(product, "character") or _field(product, "name") or "blind box"
+
+    if "pop mart" in brand or "popmart" in brand:
+        if "uk" in retailer:
+            locale = "uk"
+        elif "eu" in retailer or "de" in retailer:
+            locale = "de"
+        else:
+            locale = "us"
+        return f"https://www.popmart.com/{locale}/search/{quote(character, safe='')}"
+
+    if "smiski" in brand:
+        return f"https://www.smiski.com/search?q={quote_plus(character)}"
+
+    if "sonny angel" in brand or "sonnyangel" in brand:
+        return f"https://www.sonnyangel-store.com/search?q={quote_plus(character)}"
+
+    name = _field(product, "name") or character
+    search_term = ((_field(product, "brand") or "") + " " + name).strip()
+    return f"https://www.google.com/search?q={quote_plus('buy ' + search_term)}"
+
+
 def build_url(settings: Settings, product: Any, target: str) -> str:
     """Build the outbound URL for a product on a given marketplace/retailer.
 
-    target ∈ {ebay, popmart, stockx}. eBay/StockX use a resale search seeded with
-    the product name; popmart links straight to the product page.
-    """
-    target = (target or "ebay").lower()
-    name = _field(product, "name") or _field(product, "character") or "blind box"
-    brand = _field(product, "brand") or ""
-    search_term = f"{brand} {name}".strip()
+    target ∈ {site, ebay, stockx}.
 
-    if target == "popmart":
-        retailer = (_field(product, "retailer") or "").lower()
-        # Use search URLs — direct product pages go stale when items sell out or URLs change.
-        if "pop mart" in brand.lower() or "popmart" in brand.lower():
-            if "uk" in retailer:
-                locale = "uk"
-            elif "eu" in retailer or "de" in retailer:
-                locale = "de"
-            else:
-                locale = "us"
-            url = f"https://www.popmart.com/{locale}/search/{quote(name, safe='')}"
-            if settings.popmart_affiliate_ref:
+    'site' (default) sends the user to the product's own retailer page via the
+    stored product_url. If no URL is stored, falls back to a character-name search
+    on the appropriate retailer site.
+    """
+    target = (target or "site").lower()
+
+    if target in ("site", "popmart", "smiski", "sonnyangel"):
+        # Use the stored product URL — it points directly to the right page.
+        url = (_field(product, "product_url") or "").strip()
+        if url and url.startswith("http"):
+            brand = (_field(product, "brand") or "").lower()
+            if ("pop mart" in brand or "popmart" in brand) and settings.popmart_affiliate_ref:
                 return _add_params(url, {"ref": settings.popmart_affiliate_ref})
             return url
-        if "smiski" in brand.lower():
-            return f"https://www.smiski.com/search?q={quote_plus(name)}"
-        if "sonny angel" in brand.lower():
-            return f"https://www.sonnyangel-store.com/search?q={quote_plus(name)}"
-        return f"https://www.google.com/search?q={quote_plus('buy ' + search_term)}"
+        # No stored URL — fall back to character-name search on the right site.
+        return _retailer_search_url(product)
 
     if target == "stockx":
-        url = f"https://stockx.com/search?s={quote_plus(search_term)}"
+        name = _field(product, "name") or _field(product, "character") or "blind box"
+        brand = _field(product, "brand") or ""
+        url = f"https://stockx.com/search?s={quote_plus((brand + ' ' + name).strip())}"
         if settings.stockx_affiliate_ref:
             return _add_params(url, {"ref": settings.stockx_affiliate_ref})
         return url
 
-    # Default: eBay sold/active search with EPN campaign tag.
-    url = f"https://www.ebay.com/sch/i.html?_nkw={quote_plus(search_term)}"
+    # Default: eBay search (resale).
+    name = _field(product, "name") or _field(product, "character") or "blind box"
+    brand = _field(product, "brand") or ""
+    url = f"https://www.ebay.com/sch/i.html?_nkw={quote_plus((brand + ' ' + name).strip())}"
     if settings.ebay_campaign_id:
         url = _add_params(url, {"mkcid": "1", "campid": settings.ebay_campaign_id})
     return url
 
 
-TARGETS = ("ebay", "popmart", "stockx")
+TARGETS = ("site", "ebay", "stockx")

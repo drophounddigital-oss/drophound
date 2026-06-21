@@ -1,7 +1,7 @@
 from drophound.affiliates import build_url
 from drophound.config import get_settings
 
-PRODUCT = {
+POPMART_US = {
     "brand": "Pop Mart",
     "name": "Labubu Exciting Macaron Blind Box",
     "character": "Labubu",
@@ -9,7 +9,7 @@ PRODUCT = {
     "product_url": "https://www.popmart.com/us/products/labubu-exciting-macaron",
 }
 
-PRODUCT_EU = {
+POPMART_EU = {
     "brand": "Pop Mart",
     "name": "Labubu Let's Checkmate Blind Box",
     "character": "Labubu",
@@ -17,54 +17,85 @@ PRODUCT_EU = {
     "product_url": "https://www.popmart.com/de/products/labubu-lets-checkmate",
 }
 
-PRODUCT_UK = {
+POPMART_NO_URL = {
     "brand": "Pop Mart",
-    "name": "Skullpanda Image of Reality",
-    "character": "Skullpanda",
-    "retailer": "Pop Mart UK",
+    "name": "Labubu Unknown Series",
+    "character": "Labubu",
+    "retailer": "Pop Mart US",
     "product_url": "",
 }
 
+SMISKI = {
+    "brand": "Smiski",
+    "name": "Smiski Living Series",
+    "character": "Smiski",
+    "retailer": "Smiski US",
+    "product_url": "https://www.smiski.com/products/living-series",
+}
+
+SONNY_ANGEL = {
+    "brand": "Sonny Angel",
+    "name": "Sonny Angel Hippers Blind Box",
+    "character": "Sonny Angel",
+    "retailer": "Sonny Angel US",
+    "product_url": "https://www.sonnyangel-store.com/products/hippers",
+}
+
+
+# --- site target (direct product page) ------------------------------------
+
+def test_site_target_uses_stored_url():
+    settings = get_settings()
+    url = build_url(settings, POPMART_US, "site")
+    assert url == "https://www.popmart.com/us/products/labubu-exciting-macaron"
+
+
+def test_site_target_smiski_uses_stored_url():
+    settings = get_settings()
+    assert build_url(settings, SMISKI, "site") == "https://www.smiski.com/products/living-series"
+
+
+def test_site_target_sonny_angel_uses_stored_url():
+    settings = get_settings()
+    assert build_url(settings, SONNY_ANGEL, "site") == "https://www.sonnyangel-store.com/products/hippers"
+
+
+def test_site_target_falls_back_to_character_search_when_no_url():
+    settings = get_settings()
+    url = build_url(settings, POPMART_NO_URL, "site")
+    # Fallback: character-name search (not full product name) — short and focused
+    assert url.startswith("https://www.popmart.com/us/search/")
+    assert "Labubu" in url
+    assert "+" not in url  # must use %20, not + (path segment)
+
+
+def test_popmart_eu_fallback_uses_de_locale():
+    no_url = {**POPMART_EU, "product_url": ""}
+    settings = get_settings()
+    assert build_url(settings, no_url, "site").startswith("https://www.popmart.com/de/search/")
+
+
+# --- eBay target ----------------------------------------------------------
 
 def test_ebay_search_url_without_campaign(monkeypatch):
     monkeypatch.delenv("EBAY_CAMPAIGN_ID", raising=False)
     settings = get_settings()
-    url = build_url(settings, PRODUCT, "ebay")
+    url = build_url(settings, POPMART_US, "ebay")
     assert url.startswith("https://www.ebay.com/sch/")
-    assert "Labubu" in url or "Labubu".lower() in url.lower()
+    assert "Labubu" in url
     assert "campid" not in url
 
 
 def test_ebay_url_includes_campaign_when_set(monkeypatch):
     monkeypatch.setenv("EBAY_CAMPAIGN_ID", "5338999999")
     settings = get_settings()
-    url = build_url(settings, PRODUCT, "ebay")
+    url = build_url(settings, POPMART_US, "ebay")
     assert "campid=5338999999" in url
 
 
-def test_popmart_us_uses_search():
-    # Always use search — direct product URLs go 404 when items sell out.
-    # Spaces must be %20 (path encoding), not + (query-string encoding).
-    settings = get_settings()
-    url = build_url(settings, PRODUCT, "popmart")
-    assert url.startswith("https://www.popmart.com/us/search/")
-    assert "Labubu" in url
-    assert "+" not in url
-
-
-def test_popmart_eu_uses_de_locale():
-    settings = get_settings()
-    url = build_url(settings, PRODUCT_EU, "popmart")
-    assert url.startswith("https://www.popmart.com/de/search/")
-
-
-def test_popmart_uk_uses_uk_locale():
-    settings = get_settings()
-    url = build_url(settings, PRODUCT_UK, "popmart")
-    assert url.startswith("https://www.popmart.com/uk/search/")
-
+# --- stockx target --------------------------------------------------------
 
 def test_stockx_target_is_search():
     settings = get_settings()
-    url = build_url(settings, PRODUCT, "stockx")
+    url = build_url(settings, POPMART_US, "stockx")
     assert url.startswith("https://stockx.com/search")

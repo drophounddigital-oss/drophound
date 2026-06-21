@@ -47,7 +47,7 @@
         <div class="price-now">{{ d.price | money }}<span>retail</span></div>
         <div class="price-resale">{{ d.resale_median | money }}<span>resale{% if d.multiple %} · {{ d.multiple }}x{% endif %}</span></div>
       </div>
-      <div class="drop-actions"><a class="btn btn-sm" href="/go/{{ d.product_id }}?to=popmart" target="_blank">Buy</a></div>
+      <div class="drop-actions"><a class="btn btn-sm" href="/go/{{ d.product_id }}?to={{ d.buy_target }}" target="_blank">Buy</a></div>
     </article>
     {% endfor %}
   </div>

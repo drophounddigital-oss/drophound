@@ -118,6 +118,40 @@ def cmd_resale(args, settings) -> int:
     return 0
 
 
+def cmd_refresh_prices(args, settings) -> int:
+    from .engine.price_fetch import refresh_prices
+    conn = _conn(settings)
+    dry = getattr(args, "dry_run", False)
+    print(f"{'[DRY RUN] ' if dry else ''}Fetching current prices from retailer sites…")
+    results = refresh_prices(conn, settings, dry_run=dry)
+    updated = failed = same = skipped = 0
+    for r in results:
+        st = r["status"]
+        old = f"${r['old_price']:.2f}" if r["old_price"] is not None else "—"
+        new = f"${r['new_price']:.2f}" if r["new_price"] is not None else "N/A"
+        avail = ""
+        if r.get("available") is not None:
+            avail = "  [in stock]" if r["available"] else "  [sold out]"
+        if "updated" in st:
+            updated += 1
+            print(f"  ↑ {r['name'][:50]:50}  {old} → {new}{avail}")
+        elif st == "fetch_failed":
+            failed += 1
+            reason = r.get("reason", "")
+            print(f"  ✗ {r['name'][:50]:50}  (fetch failed: {reason})")
+        elif st == "unsupported":
+            skipped += 1
+            print(f"  ~ {r['name'][:50]:50}  {old} (skipped: {r.get('reason', '')})")
+        else:
+            same += 1
+            print(f"  · {r['name'][:50]:50}  {new} (no change){avail}")
+    print(f"\n✓ {updated} updated  {same} unchanged  {failed} failed  {skipped} skipped"
+          + ("  (dry run — DB not modified)" if dry else ""))
+    if skipped:
+        print("  Tip: Pop Mart prices use client-side JS — update manually in fixtures/catalog.json")
+    return 0
+
+
 def cmd_add_product(args, settings) -> int:
     import httpx
     from urllib.parse import urlparse
@@ -361,6 +395,10 @@ def build_parser() -> argparse.ArgumentParser:
     dp.set_defaults(func=cmd_digest)
 
     sub.add_parser("resale-refresh", help="refresh all resale snapshots").set_defaults(func=cmd_resale)
+
+    rfp = sub.add_parser("refresh-prices", help="fetch current retail prices from retailer sites")
+    rfp.add_argument("--dry-run", action="store_true", help="show what would change without updating")
+    rfp.set_defaults(func=cmd_refresh_prices)
 
     sub.add_parser("test-alert", help="send one test alert to configured channels").set_defaults(func=cmd_test_alert)
 

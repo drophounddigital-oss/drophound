@@ -92,6 +92,7 @@ def event_view(conn: sqlite3.Connection, row: sqlite3.Row, now) -> dict:
         "age": humanize_age(parse_iso(row["detected_at"]), now=now),
         "color": row["image_hint"] or "#888",
         "initials": initials(row["character"]),
+        "buy_target": "site",
     }
 
 
