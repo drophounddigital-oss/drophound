@@ -5,16 +5,23 @@ PRODUCT = {
     "brand": "Pop Mart",
     "name": "Labubu Exciting Macaron Blind Box",
     "character": "Labubu",
-    "retailer": "toytokyo.com",  # a real store domain
-    "product_url": "https://toytokyo.com/products/pop-mart-labubu-exciting-macaron",
+    "retailer": "Pop Mart US",
+    "product_url": "https://www.popmart.com/us/products/labubu-exciting-macaron",
 }
 
-# A product with no stored URL — should fall back to a search.
-DEMO_PRODUCT = {
+PRODUCT_EU = {
     "brand": "Pop Mart",
-    "name": "Labubu Big Into Energy",
+    "name": "Labubu Let's Checkmate Blind Box",
     "character": "Labubu",
-    "retailer": "Pop Mart US",
+    "retailer": "Pop Mart EU",
+    "product_url": "https://www.popmart.com/de/products/labubu-lets-checkmate",
+}
+
+PRODUCT_UK = {
+    "brand": "Pop Mart",
+    "name": "Skullpanda Image of Reality",
+    "character": "Skullpanda",
+    "retailer": "Pop Mart UK",
     "product_url": "",
 }
 
@@ -35,18 +42,24 @@ def test_ebay_url_includes_campaign_when_set(monkeypatch):
     assert "campid=5338999999" in url
 
 
-def test_popmart_real_store_uses_product_url():
+def test_popmart_us_uses_search():
+    # Always use search — direct product URLs go 404 when items sell out.
     settings = get_settings()
     url = build_url(settings, PRODUCT, "popmart")
-    assert url.startswith("https://toytokyo.com/products/pop-mart-labubu-exciting-macaron")
-
-
-def test_popmart_demo_falls_back_to_search():
-    # Placeholder URL -> a working Pop Mart search, never a dead product page.
-    settings = get_settings()
-    url = build_url(settings, DEMO_PRODUCT, "popmart")
     assert url.startswith("https://www.popmart.com/us/search/")
     assert "Labubu" in url
+
+
+def test_popmart_eu_uses_de_locale():
+    settings = get_settings()
+    url = build_url(settings, PRODUCT_EU, "popmart")
+    assert url.startswith("https://www.popmart.com/de/search/")
+
+
+def test_popmart_uk_uses_uk_locale():
+    settings = get_settings()
+    url = build_url(settings, PRODUCT_UK, "popmart")
+    assert url.startswith("https://www.popmart.com/uk/search/")
 
 
 def test_stockx_target_is_search():

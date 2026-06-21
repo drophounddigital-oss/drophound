@@ -18,12 +18,11 @@
       drop or restock, you know. Before they sell out.
     </p>
 
-    <form id="join" class="join" action="/subscribe" method="post">
+    <form id="join" class="join" action="/register" method="get">
       <input type="email" name="email" placeholder="you@email.com" required aria-label="Email" />
-      <input type="text" name="telegram" placeholder="@telegram (optional)" aria-label="Telegram handle" />
       <button class="btn" type="submit">Get free alerts</button>
     </form>
-    <p class="micro">Free forever. Telegram + Discord + email. No spam, just drops.</p>
+    <p class="micro">Free forever · Telegram + Discord + email · No spam, just drops.</p>
 
     <div class="stats">
       <div><strong>{{ site.tracked }}</strong><span>products tracked</span></div>

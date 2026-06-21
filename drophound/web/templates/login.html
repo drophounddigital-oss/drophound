@@ -21,7 +21,8 @@
 
       <label class="field-label" for="r-email">Email</label>
       <input id="r-email" type="email" name="email" placeholder="you@email.com"
-             autocomplete="email" required autofocus />
+             autocomplete="email" required autofocus
+             value="{{ request.query_params.get('email', '') }}" />
 
       <label class="field-label" for="r-pw">Password <span class="muted">(min 8 chars)</span></label>
       <input id="r-pw" type="password" name="password" placeholder="••••••••"

@@ -39,16 +39,23 @@ def build_url(settings: Settings, product: Any, target: str) -> str:
     search_term = f"{brand} {name}".strip()
 
     if target == "popmart":
-        retailer = _field(product, "retailer") or ""
-        url = (_field(product, "product_url") or "").strip()
-        # If we have a real product URL, use it directly.
-        if url and url.startswith("http"):
+        retailer = (_field(product, "retailer") or "").lower()
+        # Use search URLs — direct product pages go stale when items sell out or URLs change.
+        if "pop mart" in brand.lower() or "popmart" in brand.lower():
+            if "uk" in retailer:
+                locale = "uk"
+            elif "eu" in retailer or "de" in retailer:
+                locale = "de"
+            else:
+                locale = "us"
+            url = f"https://www.popmart.com/{locale}/search/{quote_plus(name)}"
             if settings.popmart_affiliate_ref:
                 return _add_params(url, {"ref": settings.popmart_affiliate_ref})
             return url
-        # No stored URL — fall back to a search so the link still works.
-        if "pop mart" in brand.lower() or "popmart" in brand.lower():
-            return f"https://www.popmart.com/us/search/{quote_plus(name)}"
+        if "smiski" in brand.lower():
+            return f"https://www.smiski.com/search?q={quote_plus(name)}"
+        if "sonny angel" in brand.lower():
+            return f"https://www.sonnyangel-store.com/search?q={quote_plus(name)}"
         return f"https://www.google.com/search?q={quote_plus('buy ' + search_term)}"
 
     if target == "stockx":
