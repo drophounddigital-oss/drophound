@@ -44,7 +44,11 @@
         <p class="muted">{{ d.retailer }} ({{ d.region }}) · {{ d.age }}</p>
       </div>
       <div class="drop-prices">
+        {% if d.resale_low and d.resale_high %}
+        <div class="price-now">${{ d.resale_low | round(0) | int }} – ${{ d.resale_high | round(0) | int }}<span>on eBay</span></div>
+        {% else %}
         <div class="price-now">{{ d.price | money }}<span>retail</span></div>
+        {% endif %}
         <div class="price-resale">{{ d.resale_median | money }}<span>resale{% if d.multiple %} · {{ d.multiple }}x{% endif %}</span></div>
       </div>
       <div class="drop-actions"><a class="btn btn-sm" href="/go/{{ d.product_id }}?to={{ d.buy_target }}" target="_blank">Buy</a></div>

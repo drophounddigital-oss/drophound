@@ -176,7 +176,9 @@ document.addEventListener("click", async (e) => {
         <div class="cat-info">
           <div class="cat-name-row">${statusDot}<span class="cat-name">${esc(p.name)}</span></div>
           <div class="cat-meta">${esc(p.brand)} · ${esc(p.retailer)}</div>
-          ${p.price  ? `<div class="cat-price">$${p.price.toFixed(2)}</div>` : ""}
+          ${p.resale_low && p.resale_high
+            ? `<div class="cat-price" data-tip="eBay price range">$${p.resale_low.toFixed(0)} – $${p.resale_high.toFixed(0)}</div>`
+            : p.price ? `<div class="cat-price">$${p.price.toFixed(2)}</div>` : ""}
           ${p.resale_median ? `<div class="cat-resale" data-tip="eBay median">↗ $${p.resale_median.toFixed(2)}</div>` : ""}
         </div>
         <div class="cat-actions">

@@ -88,6 +88,8 @@ def event_view(conn: sqlite3.Connection, row: sqlite3.Row, now) -> dict:
         "badge_class": badge_class,
         "price": row["price"] if row["price"] is not None else row["retail_price"],
         "resale_median": median,
+        "resale_low": res["low"] if res else None,
+        "resale_high": res["high"] if res else None,
         "multiple": premium_multiple(row["retail_price"], median),
         "age": humanize_age(parse_iso(row["detected_at"]), now=now),
         "color": row["image_hint"] or "#888",
@@ -588,8 +590,12 @@ POPULAR_CHARACTERS = ["Labubu", "Molly", "Skullpanda", "Crybaby", "Hirono",
 PAGE_SIZE = 24
 _STATUS_SUB = ("(SELECT status FROM restock_events e WHERE e.product_id=p.id "
                "ORDER BY e.detected_at DESC, e.id DESC LIMIT 1)")
-_RESALE_SUB = ("(SELECT median FROM resale_prices r WHERE r.product_id=p.id "
-               "ORDER BY r.captured_at DESC, r.id DESC LIMIT 1)")
+_RESALE_SUB  = ("(SELECT median FROM resale_prices r WHERE r.product_id=p.id "
+                "ORDER BY r.captured_at DESC, r.id DESC LIMIT 1)")
+_RESALE_LOW  = ("(SELECT low    FROM resale_prices r WHERE r.product_id=p.id "
+                "ORDER BY r.captured_at DESC, r.id DESC LIMIT 1)")
+_RESALE_HIGH = ("(SELECT high   FROM resale_prices r WHERE r.product_id=p.id "
+                "ORDER BY r.captured_at DESC, r.id DESC LIMIT 1)")
 
 
 def get_current_user(conn: sqlite3.Connection, request: Request) -> sqlite3.Row | None:
@@ -621,7 +627,10 @@ def _product_item(row: sqlite3.Row, watched: set[int]) -> dict:
         "id": row["id"], "name": row["name"], "brand": row["brand"],
         "character": row["character"], "retailer": row["retailer"],
         "region": row["region"], "price": row["retail_price"],
-        "resale_median": row["resale_median"], "status": row["status"] or "unknown",
+        "resale_median": row["resale_median"],
+        "resale_low": row["resale_low"] if "resale_low" in row.keys() else None,
+        "resale_high": row["resale_high"] if "resale_high" in row.keys() else None,
+        "status": row["status"] or "unknown",
         "color": row["image_hint"] or "#7c6cff", "initials": initials(row["character"]),
         "watched": row["id"] in watched,
     }
@@ -640,7 +649,8 @@ def catalog_page(conn, q, character, in_stock_only, page, watched):
     wsql = (" WHERE " + " AND ".join(where)) if where else ""
     total = db.one(conn, f"SELECT COUNT(*) c FROM products p{wsql}", params)["c"]
     rows = db.q(conn, f"""SELECT p.id, p.name, p.brand, p.character, p.retailer, p.region,
-        p.retail_price, p.image_hint, {_STATUS_SUB} AS status, {_RESALE_SUB} AS resale_median
+        p.retail_price, p.image_hint, {_STATUS_SUB} AS status, {_RESALE_SUB} AS resale_median,
+        {_RESALE_LOW} AS resale_low, {_RESALE_HIGH} AS resale_high
         FROM products p{wsql} ORDER BY ({_STATUS_SUB}='in_stock') DESC, p.id
         LIMIT ? OFFSET ?""", params + [PAGE_SIZE, (page - 1) * PAGE_SIZE])
     pages = max(1, (total + PAGE_SIZE - 1) // PAGE_SIZE)
@@ -798,7 +808,8 @@ async def api_watchlist(request: Request):
         if not sub:
             return JSONResponse({"products": [], "count": 0})
         rows = db.q(conn, f"""SELECT p.id, p.name, p.brand, p.character, p.retailer, p.region,
-            p.retail_price, p.image_hint, {_STATUS_SUB} AS status, {_RESALE_SUB} AS resale_median
+            p.retail_price, p.image_hint, {_STATUS_SUB} AS status, {_RESALE_SUB} AS resale_median,
+            {_RESALE_LOW} AS resale_low, {_RESALE_HIGH} AS resale_high
             FROM watchlist w JOIN products p ON p.id = w.product_id
             WHERE w.subscriber_id = ? ORDER BY w.created_at DESC""", (sub["id"],))
         items = [_product_item(r, {r["id"] for r in rows}) for r in rows]
