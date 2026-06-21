@@ -9,6 +9,7 @@ Plus a small JSON API under /api and the AI digest at /digest.
 
 from __future__ import annotations
 
+import hmac
 import html
 import logging
 import re
@@ -572,6 +573,7 @@ async def robots_txt(request: Request):
         "Disallow: /watch/remove\n"
         "Disallow: /subscribe\n"
         "Disallow: /upgrade\n"
+        "Disallow: /admin\n"
         f"Sitemap: {base}/sitemap.xml\n"
     )
     return PlainTextResponse(body)
@@ -994,6 +996,66 @@ async def _server_error(request: Request, exc: Exception) -> Response:
         conn.close()
 
 
+def _admin_check(request: Request) -> str | None:
+    """Return the admin key from query/form, or None if missing/wrong."""
+    settings = get_settings()
+    if not settings.admin_secret:
+        return None
+    key = request.query_params.get("key") or ""
+    if not hmac.compare_digest(key, settings.admin_secret):
+        return None
+    return key
+
+
+async def admin_page(request: Request):
+    key = _admin_check(request)
+    if not key:
+        return PlainTextResponse("Forbidden", status_code=403)
+    conn = open_conn()
+    try:
+        users_raw = db.q(conn, """
+            SELECT s.*, (SELECT COUNT(*) FROM watchlist w WHERE w.subscriber_id=s.id) AS watch_count
+            FROM subscribers s ORDER BY s.created_at DESC
+        """)
+        users = [dict(u) for u in users_raw]
+        total = len(users)
+        premium = sum(1 for u in users if u["tier"] == "premium")
+        return templates.TemplateResponse(request, "admin.html", {
+            "users": users, "total": total, "premium": premium,
+            "free": total - premium, "key": key,
+            "csrf_token": _csrf(request),
+            "message": request.query_params.get("msg"),
+        })
+    finally:
+        conn.close()
+
+
+async def admin_delete_user(request: Request):
+    form = await request.form()
+    key = form.get("key") or ""
+    settings = get_settings()
+    if not settings.admin_secret or not hmac.compare_digest(key, settings.admin_secret):
+        return PlainTextResponse("Forbidden", status_code=403)
+    if _bad_csrf(request, form):
+        return PlainTextResponse("Invalid CSRF token", status_code=403)
+    email = sanitize_str(form.get("email") or "", 320).lower()
+    if not email or "@" not in email:
+        return RedirectResponse(f"/admin?key={key}&msg=Invalid+email", status_code=303)
+    conn = open_conn()
+    try:
+        sub = get_subscriber(conn, email)
+        if not sub:
+            return RedirectResponse(f"/admin?key={key}&msg=User+not+found", status_code=303)
+        db.execute(conn, "DELETE FROM watchlist WHERE subscriber_id=?", (sub["id"],))
+        db.execute(conn, "DELETE FROM collection_items WHERE subscriber_id=?", (sub["id"],))
+        db.execute(conn, "DELETE FROM subscribers WHERE id=?", (sub["id"],))
+        firebase_db.log_event(email, "admin_deleted", detail=f"by_admin ip={_client_ip(request)}")
+        firebase_db.delete_user(email)
+        return RedirectResponse(f"/admin?key={key}&msg=Deleted+{email}", status_code=303)
+    finally:
+        conn.close()
+
+
 async def privacy_page(request: Request):
     conn = open_conn()
     try:
@@ -1087,6 +1149,8 @@ routes = [
     Route("/api/collection/{subscriber_id:int}/value", api_collection_value),
     Route("/privacy", privacy_page),
     Route("/terms", terms_page),
+    Route("/admin", admin_page),
+    Route("/admin/delete-user", admin_delete_user, methods=["POST"]),
     Mount("/static", app=StaticFiles(directory=str(STATIC_DIR)), name="static"),
 ]
 

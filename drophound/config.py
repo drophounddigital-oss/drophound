@@ -96,6 +96,9 @@ class Settings:
     # across rolling restarts (32-hex string recommended)
     csrf_secret: str
 
+    # Admin panel — set a long random string; leave unset to disable /admin
+    admin_secret: str | None
+
     # Firebase Firestore (optional) — paste the service-account JSON string
     firebase_credentials_json: str | None
     firebase_project_id: str | None
@@ -135,6 +138,7 @@ def get_settings() -> Settings:
         anthropic_api_key=_get("ANTHROPIC_API_KEY"),
         hook_secret=_get("DROPHOUND_HOOK_SECRET"),
         csrf_secret=_get("DROPHOUND_CSRF_SECRET") or _derive_csrf_secret(),
+        admin_secret=_get("DROPHOUND_ADMIN_SECRET"),
         firebase_credentials_json=_get("FIREBASE_CREDENTIALS_JSON"),
         firebase_project_id=_get("FIREBASE_PROJECT_ID"),
     )
