@@ -64,16 +64,22 @@ def test_popmart_uk_also_routes_to_ebay():
     assert url.startswith("https://www.ebay.com/sch/")
 
 
-# --- Non-Pop Mart brands: use stored product_url directly ------------------
+# --- Smiski / Sonny Angel: always Amazon search from product name ----------
+# (Stored URLs may point to dead domains from old seed data; name-based
+#  Amazon search is reliable regardless of what's in the DB.)
 
-def test_smiski_uses_stored_url():
+def test_smiski_uses_amazon_search():
     settings = get_settings()
-    assert build_url(settings, SMISKI, "site") == "https://www.amazon.com/s?k=Smiski+Living+Series"
+    url = build_url(settings, SMISKI, "site")
+    assert url.startswith("https://www.amazon.com/s?")
+    assert "Smiski" in url
 
 
-def test_sonny_angel_uses_stored_url():
+def test_sonny_angel_uses_amazon_search():
     settings = get_settings()
-    assert build_url(settings, SONNY_ANGEL, "site") == "https://www.amazon.com/s?k=Sonny+Angel+Hippers"
+    url = build_url(settings, SONNY_ANGEL, "site")
+    assert url.startswith("https://www.amazon.com/s?")
+    assert "Sonny+Angel" in url
 
 
 # --- eBay target ----------------------------------------------------------

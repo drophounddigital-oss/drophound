@@ -83,11 +83,20 @@ def build_url(settings: Settings, product: Any, target: str) -> str:
                 url = _add_params(url, {"mkcid": "1", "campid": settings.ebay_campaign_id})
             return url
 
-        # All other brands: use the stored product URL (Amazon, etc.).
+        # Smiski / Sonny Angel: always build an Amazon search URL from the
+        # product name. Stored URLs may point to dead domains (old seed data).
+        if "smiski" in brand:
+            name = _field(product, "name") or _field(product, "character") or "Smiski"
+            return f"https://www.amazon.com/s?k={quote_plus(name)}"
+
+        if "sonny angel" in brand or "sonnyangel" in brand:
+            name = _field(product, "name") or _field(product, "character") or "Sonny Angel"
+            return f"https://www.amazon.com/s?k={quote_plus(name)}"
+
+        # All other brands: use the stored product URL.
         url = (_field(product, "product_url") or "").strip()
         if url and url.startswith("http"):
             return url
-        # No stored URL — fall back to character-name search on the right site.
         return _retailer_search_url(product)
 
     if target == "stockx":
