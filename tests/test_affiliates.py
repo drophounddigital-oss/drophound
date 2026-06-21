@@ -44,10 +44,12 @@ def test_ebay_url_includes_campaign_when_set(monkeypatch):
 
 def test_popmart_us_uses_search():
     # Always use search — direct product URLs go 404 when items sell out.
+    # Spaces must be %20 (path encoding), not + (query-string encoding).
     settings = get_settings()
     url = build_url(settings, PRODUCT, "popmart")
     assert url.startswith("https://www.popmart.com/us/search/")
     assert "Labubu" in url
+    assert "+" not in url
 
 
 def test_popmart_eu_uses_de_locale():

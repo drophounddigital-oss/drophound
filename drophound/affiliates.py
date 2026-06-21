@@ -8,7 +8,7 @@ not the visitor ever subscribes.
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote_plus, urlencode, urlparse, urlunparse, parse_qsl
+from urllib.parse import quote, quote_plus, urlencode, urlparse, urlunparse, parse_qsl
 
 from .config import Settings
 
@@ -48,7 +48,7 @@ def build_url(settings: Settings, product: Any, target: str) -> str:
                 locale = "de"
             else:
                 locale = "us"
-            url = f"https://www.popmart.com/{locale}/search/{quote_plus(name)}"
+            url = f"https://www.popmart.com/{locale}/search/{quote(name, safe='')}"
             if settings.popmart_affiliate_ref:
                 return _add_params(url, {"ref": settings.popmart_affiliate_ref})
             return url
