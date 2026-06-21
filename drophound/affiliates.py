@@ -73,15 +73,14 @@ def build_url(settings: Settings, product: Any, target: str) -> str:
         brand = (_field(product, "brand") or "").lower()
         retailer = (_field(product, "retailer") or "").lower()
 
-        # Pop Mart: always use a name-based search. Their product page handles
-        # are internal IDs that don't match simple slugs, so direct links throw
-        # client-side errors. A full product-name search returns 1-3 results.
+        # Pop Mart: route to eBay search. Their own product slugs are internal
+        # IDs that throw client-side errors, and their search returns their own
+        # catalog only. eBay has broad reseller listings for every Pop Mart SKU.
         if "pop mart" in brand or "popmart" in brand:
-            locale = "uk" if "uk" in retailer else "de" if "eu" in retailer else "us"
             name = _field(product, "name") or _field(product, "character") or "blind box"
-            url = f"https://www.popmart.com/{locale}/search/{quote(name, safe='')}"
-            if settings.popmart_affiliate_ref:
-                return _add_params(url, {"ref": settings.popmart_affiliate_ref})
+            url = f"https://www.ebay.com/sch/i.html?_nkw={quote_plus(('Pop Mart ' + name).strip())}"
+            if settings.ebay_campaign_id:
+                url = _add_params(url, {"mkcid": "1", "campid": settings.ebay_campaign_id})
             return url
 
         # All other brands: use the stored product URL (Amazon, etc.).

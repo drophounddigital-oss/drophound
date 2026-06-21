@@ -42,30 +42,26 @@ SONNY_ANGEL = {
 }
 
 
-# --- Pop Mart: always name-search (direct slugs throw strconv errors) ------
+# --- Pop Mart: routes to eBay (own site slugs throw strconv errors) --------
 
-def test_popmart_us_uses_name_search():
-    # Pop Mart product page slugs are internal IDs that don't match simple
-    # handles — their JS throws strconv errors on load. Name search returns
-    # 1-3 specific results and always works.
+def test_popmart_site_routes_to_ebay():
     settings = get_settings()
     url = build_url(settings, POPMART_US, "site")
-    assert url.startswith("https://www.popmart.com/us/search/")
-    assert "Labubu%20Exciting%20Macaron" in url
-    assert "+" not in url  # %20, not + (path segment, not query string)
+    assert url.startswith("https://www.ebay.com/sch/")
+    assert "Pop+Mart" in url
+    assert "Labubu" in url
 
 
-def test_popmart_eu_uses_de_locale():
+def test_popmart_eu_also_routes_to_ebay():
     settings = get_settings()
     url = build_url(settings, POPMART_EU, "site")
-    assert url.startswith("https://www.popmart.com/de/search/")
-    assert "+" not in url
+    assert url.startswith("https://www.ebay.com/sch/")
 
 
-def test_popmart_uk_uses_uk_locale():
+def test_popmart_uk_also_routes_to_ebay():
     settings = get_settings()
     url = build_url(settings, POPMART_UK, "site")
-    assert url.startswith("https://www.popmart.com/uk/search/")
+    assert url.startswith("https://www.ebay.com/sch/")
 
 
 # --- Non-Pop Mart brands: use stored product_url directly ------------------
