@@ -3,15 +3,52 @@
 // --------------------------------------------------------------------------
 // Copy-to-clipboard (digest share captions)
 // --------------------------------------------------------------------------
-document.addEventListener("click", (e) => {
+function flashCopied(btn) {
+  const original = btn.dataset.label || btn.textContent;
+  btn.dataset.label = original;
+  btn.textContent = "Copied ✓";
+  btn.classList.add("copied");
+  setTimeout(() => {
+    btn.textContent = original;
+    btn.classList.remove("copied");
+  }, 1400);
+}
+
+async function copyText(text) {
+  // Preferred: async Clipboard API (needs HTTPS / secure context)
+  if (navigator.clipboard && window.isSecureContext) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch (_) { /* fall through to legacy path */ }
+  }
+  // Fallback: hidden textarea + execCommand (works without secure context)
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch (_) {
+    return false;
+  }
+}
+
+document.addEventListener("click", async (e) => {
   const btn = e.target.closest(".copy");
   if (!btn) return;
   const text = btn.getAttribute("data-copy") || "";
-  navigator.clipboard?.writeText(text).then(() => {
-    const original = btn.textContent;
-    btn.textContent = "Copied ✓";
-    setTimeout(() => (btn.textContent = original), 1400);
-  });
+  const ok = await copyText(text);
+  if (ok) flashCopied(btn);
+  else {
+    btn.textContent = "Press ⌘C";
+    setTimeout(() => (btn.textContent = btn.dataset.label || "Copy"), 1600);
+  }
 });
 
 // --------------------------------------------------------------------------
