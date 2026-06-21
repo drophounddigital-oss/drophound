@@ -66,7 +66,7 @@
     <nav class="nav-links">
       <a href="/watch">Browse</a>
       <a href="/drops">Drops</a>
-      <a href="/digest">Digest</a>
+      {% if site.current_user %}<a href="/app">Dashboard</a>{% endif %}
       <a href="/pricing">Pricing</a>
     </nav>
     {% if site.current_user %}

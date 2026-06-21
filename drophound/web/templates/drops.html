@@ -8,7 +8,11 @@
     <h1>Live drops</h1>
     <p class="muted">Every restock, drop and price move across tracked retailers. {{ site.tracked }} products watched.</p>
   </div>
-  <a class="btn btn-ghost" href="/#join">Get these as alerts →</a>
+  {% if site.current_user %}
+  <a class="btn btn-ghost" href="/watch">Manage your watchlist →</a>
+  {% else %}
+  <a class="btn btn-ghost" href="/register">Get these as alerts →</a>
+  {% endif %}
 </div>
 
 {% if events %}

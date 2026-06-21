@@ -4,7 +4,7 @@
 {% block content %}
 
 {% if upgraded %}
-<div class="banner banner-ok">Upgraded to Premium (demo). Your <a href="/app">dashboard</a> now shows filtered alerts and restock predictions.</div>
+<div class="banner banner-ok">You're now Premium. Head to your <a href="/app">dashboard</a> for filtered alerts and restock predictions.</div>
 {% endif %}
 {% if error %}
 <div class="banner banner-err">Couldn't start checkout — please try again, or contact support if it keeps happening.</div>
@@ -25,7 +25,11 @@
       <li>Live public drops feed</li>
       <li>Daily digest</li>
     </ul>
-    <a class="btn btn-ghost block" href="/#join">Join free</a>
+    {% if site.current_user %}
+    <a class="btn btn-ghost block" href="/watch">Browse drops →</a>
+    {% else %}
+    <a class="btn btn-ghost block" href="/register">Sign up free</a>
+    {% endif %}
   </div>
 
   <div class="card plan plan-pro">
@@ -38,12 +42,15 @@
       <li><strong>Restock predictions</strong> — likely windows from history</li>
       <li>Members-only Discord &amp; verified-seller lists</li>
     </ul>
+    {% if site.current_user %}
     <form action="/upgrade" method="post" class="upgrade-form">
-      <input type="email" name="email" placeholder="your@email.com" required aria-label="Email" />
       <button class="btn block" type="submit">
-        {% if stripe_enabled %}Subscribe — ${{ '%.0f'|format(site.premium_price) }}/mo{% else %}Upgrade (demo) — ${{ '%.0f'|format(site.premium_price) }}/mo{% endif %}
+        {% if stripe_enabled %}Subscribe — ${{ '%.0f'|format(site.premium_price) }}/mo{% else %}Upgrade (demo){% endif %}
       </button>
     </form>
+    {% else %}
+    <a class="btn block" href="/register?next=/pricing">Create account to upgrade</a>
+    {% endif %}
     {% if stripe_enabled %}
     <p class="micro center">Secure checkout via Stripe. Cancel anytime.</p>
     {% else %}

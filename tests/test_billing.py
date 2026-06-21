@@ -85,8 +85,9 @@ def test_stripe_webhook_rejects_bad_signature(client):
 
 
 def test_upgrade_demo_flip_without_stripe(client, conn):
-    # No Stripe configured -> the demo path still flips the tier locally.
-    r = client.post("/upgrade", data={"email": "demoflip@example.com"})
-    assert r.status_code == 200
+    # Register + log in first, then upgrade flips tier for the session user.
+    client.post("/register", data={"email": "demoflip@example.com", "password": "password123"})
+    r = client.post("/upgrade")
+    assert r.status_code in (200, 303)
     row = db.one(conn, "SELECT tier FROM subscribers WHERE email='demoflip@example.com'")
     assert row and row["tier"] == "premium"

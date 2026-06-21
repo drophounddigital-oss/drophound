@@ -36,7 +36,12 @@ def test_drops_page_and_api(client):
 
 
 def test_dashboard_and_collection(client):
-    assert "PREMIUM" in client.get("/app").text
+    # Not logged in: both routes redirect to login
+    assert client.get("/app", follow_redirects=False).status_code == 303
+    assert client.get("/collection", follow_redirects=False).status_code == 303
+    # After registering, dashboard loads and shows the user's email
+    client.post("/register", data={"email": "dash@example.com", "password": "password123"})
+    assert "dash@example.com" in client.get("/app").text
     assert "Cost basis" in client.get("/collection").text
 
 

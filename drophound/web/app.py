@@ -267,13 +267,10 @@ async def drops_page(request: Request):
 async def dashboard(request: Request):
     conn = open_conn()
     try:
-        now = now_utc()
-        sub = get_subscriber(conn, DEMO_EMAIL)
+        sub = get_current_user(conn, request)
         if not sub:
-            return templates.TemplateResponse(
-                request, "dashboard.html",
-                {"sub": None, "site": site_context(conn, request)},
-            )
+            return RedirectResponse("/login?next=/app", status_code=303)
+        now = now_utc()
         rows = recent_event_rows(conn, types=("drop", "restock", "price_drop"),
                                  limit=60, since_hours=24 * 14)
         matched = [event_view(conn, r, now) for r in rows
@@ -296,8 +293,10 @@ async def dashboard(request: Request):
 async def collection_page(request: Request):
     conn = open_conn()
     try:
-        sub = get_subscriber(conn, DEMO_EMAIL)
-        summary = collection_summary(conn, sub["id"]) if sub else None
+        sub = get_current_user(conn, request)
+        if not sub:
+            return RedirectResponse("/login?next=/collection", status_code=303)
+        summary = collection_summary(conn, sub["id"])
         return templates.TemplateResponse(
             request, "collection.html",
             {"sub": sub, "summary": summary, "site": site_context(conn, request)},
@@ -309,42 +308,42 @@ async def collection_page(request: Request):
 async def pricing(request: Request):
     conn = open_conn()
     try:
+        sub = get_current_user(conn, request)
         return templates.TemplateResponse(
             request, "pricing.html",
             {"site": site_context(conn, request),
              "stripe_enabled": get_settings().has_stripe,
              "upgraded": request.query_params.get("upgraded") == "1",
-             "error": request.query_params.get("error") == "1"},
+             "error": request.query_params.get("error") == "1",
+             "sub": sub},
         )
     finally:
         conn.close()
 
 
 async def upgrade(request: Request):
-    form = await request.form()
-    email = (form.get("email") or DEMO_EMAIL).strip().lower()
     settings = get_settings()
-
-    # Real payments: hand the buyer to Stripe's hosted checkout.
-    if settings.has_stripe and "@" in email:
-        try:
-            url, _ = billing.create_checkout_session(settings, email)
-            if url:
-                return RedirectResponse(url, status_code=303)
-        except Exception:
-            pass
-        return RedirectResponse("/pricing?error=1", status_code=303)
-
-    # No Stripe configured -> demo flip so the flow is still walkable.
     conn = open_conn()
     try:
-        sub = get_or_create_subscriber(conn, email)
-        if sub:
-            db.execute(
-                conn,
-                "UPDATE subscribers SET tier='premium', premium_since=? WHERE id=?",
-                (now_utc().isoformat(), sub["id"]),
-            )
+        sub = get_current_user(conn, request)
+        if not sub:
+            return RedirectResponse("/login?next=/pricing", status_code=303)
+        email = sub["email"]
+
+        # Real payments: hand the buyer to Stripe's hosted checkout.
+        if settings.has_stripe:
+            try:
+                url, _ = billing.create_checkout_session(settings, email)
+                if url:
+                    return RedirectResponse(url, status_code=303)
+            except Exception:
+                pass
+            return RedirectResponse("/pricing?error=1", status_code=303)
+
+        # No Stripe configured -> demo flip so the flow is still walkable.
+        db.execute(conn,
+            "UPDATE subscribers SET tier='premium', premium_since=? WHERE id=?",
+            (now_utc().isoformat(), sub["id"]))
         return RedirectResponse("/pricing?upgraded=1", status_code=303)
     finally:
         conn.close()
@@ -690,7 +689,10 @@ async def register_page(request: Request):
                     """INSERT INTO subscribers (email, tier, created_at, session_id, password_hash)
                        VALUES (?, 'free', ?, ?, ?)""",
                     (email, now_utc().isoformat(), sid, pw_hash))
-            return RedirectResponse("/watch", status_code=303)
+            next_url = sanitize_str(request.query_params.get("next") or "/watch", 200)
+            if not next_url.startswith("/"):
+                next_url = "/watch"
+            return RedirectResponse(next_url, status_code=303)
         return templates.TemplateResponse(request, "login.html",
             {"site": site_context(conn, request), "tab": "register"})
     finally:
