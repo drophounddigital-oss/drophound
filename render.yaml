@@ -6,7 +6,7 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: python -m drophound serve --host 0.0.0.0 --port $PORT
+    startCommand: python -m drophound serve --host 0.0.0.0 --port $PORT --workers $WEB_CONCURRENCY
     healthCheckPath: /api/health
     autoDeploy: true
     envVars:
@@ -15,6 +15,8 @@ services:
       # Ships the full catalog with the deploy (see deploy/drophound.db).
       - key: DROPHOUND_DB_PATH
         value: deploy/drophound.db
+      - key: WEB_CONCURRENCY
+        value: "2"
       # Optional: set these in the Render dashboard to make the live site send
       # real alerts. Left unset, everything runs safely in dry-run mode.
       # - key: TELEGRAM_BOT_TOKEN

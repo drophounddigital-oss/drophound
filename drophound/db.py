@@ -70,7 +70,9 @@ CREATE TABLE IF NOT EXISTS subscribers (
     price_ceiling     REAL,
     created_at        TEXT NOT NULL,
     premium_since     TEXT,
-    stripe_customer_id TEXT
+    stripe_customer_id TEXT,
+    session_id        TEXT,
+    password_hash     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS collection_items (
@@ -93,6 +95,13 @@ CREATE TABLE IF NOT EXISTS watchlist (
 );
 CREATE INDEX IF NOT EXISTS idx_watch_sub ON watchlist(subscriber_id);
 CREATE INDEX IF NOT EXISTS idx_watch_product ON watchlist(product_id);
+
+-- Performance-critical: every request does a session_id lookup
+CREATE INDEX IF NOT EXISTS idx_subscribers_session ON subscribers(session_id);
+-- Catalog search filters
+CREATE INDEX IF NOT EXISTS idx_products_character ON products(character);
+CREATE INDEX IF NOT EXISTS idx_products_brand ON products(brand);
+CREATE INDEX IF NOT EXISTS idx_products_name ON products(name);
 
 CREATE TABLE IF NOT EXISTS alerts_log (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -137,6 +146,11 @@ def connect(db_path: Path | str) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
+    conn.execute("PRAGMA synchronous = NORMAL")    # safe with WAL, ~3x faster writes
+    conn.execute("PRAGMA cache_size = -65536")     # 64 MB page cache per connection
+    conn.execute("PRAGMA temp_store = MEMORY")     # temp tables / sorts in RAM
+    conn.execute("PRAGMA mmap_size = 268435456")   # 256 MB memory-mapped I/O
+    conn.execute("PRAGMA busy_timeout = 5000")     # wait up to 5s on write-lock (multi-worker)
     return conn
 
 

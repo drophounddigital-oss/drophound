@@ -9,6 +9,7 @@ Plus a small JSON API under /api and the AI digest at /digest.
 
 from __future__ import annotations
 
+import asyncio
 import hmac
 import html
 import logging
@@ -69,9 +70,10 @@ def _client_ip(request: Request) -> str:
         or (request.client.host if request.client else "unknown")
     )
 
+
 templates = Jinja2Templates(directory=str(TEMPLATES_DIR))
 templates.env.filters["money"] = lambda v: money(v)
-templates.env.filters["pct"] = lambda v: ("—" if v is None else f"{'+' if v >= 0 else ''}{v}%")
+templates.env.filters["pct"] = lambda v: ("-" if v is None else f"{'+' if v >= 0 else ''}{v}%")
 
 BADGES = {
     "drop": ("DROP", "b-drop"),
@@ -83,12 +85,29 @@ BADGES = {
 
 
 # --------------------------------------------------------------------------- #
-# Connection + small presentation helpers
+# Connection helpers
 # --------------------------------------------------------------------------- #
 def open_conn() -> sqlite3.Connection:
     return db.connect(get_settings().db_path)
 
 
+def _run_in_db(fn):
+    """Open a connection, call fn(conn), close it. Designed for asyncio.to_thread."""
+    conn = open_conn()
+    try:
+        return fn(conn)
+    finally:
+        conn.close()
+
+
+async def _in_db(fn):
+    """Run fn(conn) in the default thread pool so the event loop stays free."""
+    return await asyncio.to_thread(_run_in_db, fn)
+
+
+# --------------------------------------------------------------------------- #
+# Presentation helpers
+# --------------------------------------------------------------------------- #
 def initials(character: str) -> str:
     words = (character or "").split()
     if len(words) >= 2:
@@ -145,6 +164,34 @@ def recent_event_rows(conn: sqlite3.Connection, *, types: tuple[str, ...] | None
 
 def get_subscriber(conn: sqlite3.Connection, email: str) -> sqlite3.Row | None:
     return db.one(conn, "SELECT * FROM subscribers WHERE email = ?", (email,))
+
+
+def get_current_user(conn: sqlite3.Connection, request: Request) -> sqlite3.Row | None:
+    """Return the logged-in subscriber for this browser session, or None."""
+    sid = get_session_id(request)
+    return db.one(conn, "SELECT * FROM subscribers WHERE session_id = ?", (sid,))
+
+
+def _user_by_sid(conn: sqlite3.Connection, sid: str) -> sqlite3.Row | None:
+    """Thread-safe alternative to get_current_user (no Request object needed)."""
+    return db.one(conn, "SELECT * FROM subscribers WHERE session_id = ?", (sid,))
+
+
+def get_or_create_subscriber(conn: sqlite3.Connection, email: str,
+                             session_id: str | None = None) -> sqlite3.Row | None:
+    email = (email or "").strip().lower()
+    if "@" not in email or "." not in email.split("@")[-1]:
+        return None
+    row = get_subscriber(conn, email)
+    if row:
+        if session_id and not (row["session_id"] if "session_id" in row.keys() else None):
+            db.execute(conn, "UPDATE subscribers SET session_id=? WHERE id=?",
+                       (session_id, row["id"]))
+        return get_subscriber(conn, email)
+    db.execute(conn,
+               "INSERT INTO subscribers (email, tier, created_at, session_id) VALUES (?, 'free', ?, ?)",
+               (email, now_utc().isoformat(), session_id))
+    return get_subscriber(conn, email)
 
 
 def collection_summary(conn: sqlite3.Connection, subscriber_id: int) -> dict:
@@ -221,17 +268,23 @@ def md_lite(text: str) -> str:
 
 def site_context(conn: sqlite3.Connection, request: Request | None = None) -> dict:
     s = get_settings()
-    ctx: dict = {
-        "base_url": s.base_url.rstrip("/"),
-        "premium_price": s.premium_price,
-        "tracked": db.one(conn, "SELECT COUNT(*) c FROM products")["c"],
-        "alerts_24h": db.one(
-            conn,
-            "SELECT COUNT(*) c FROM restock_events WHERE detected_at >= ?",
-            ((now_utc() - timedelta(hours=24)).isoformat(),),
-        )["c"],
-        "subscribers": db.one(conn, "SELECT COUNT(*) c FROM subscribers")["c"],
-    }
+    # Cache the expensive count queries across all requests for 15 s.
+    # Each key is tiny (ints), so memory cost is negligible.
+    cached = cache.get("site:ctx")
+    if cached is None:
+        cached = {
+            "base_url": s.base_url.rstrip("/"),
+            "premium_price": s.premium_price,
+            "tracked": db.one(conn, "SELECT COUNT(*) c FROM products")["c"],
+            "alerts_24h": db.one(
+                conn,
+                "SELECT COUNT(*) c FROM restock_events WHERE detected_at >= ?",
+                ((now_utc() - timedelta(hours=24)).isoformat(),),
+            )["c"],
+            "subscribers": db.one(conn, "SELECT COUNT(*) c FROM subscribers")["c"],
+        }
+        cache.set("site:ctx", cached, ttl=15)
+    ctx = dict(cached)  # copy so callers can mutate freely
     if request is not None:
         ctx["current_user"] = get_current_user(conn, request)
         ctx["csrf_token"] = _csrf(request)
@@ -242,33 +295,37 @@ def site_context(conn: sqlite3.Connection, request: Request | None = None) -> di
 # Routes
 # --------------------------------------------------------------------------- #
 async def landing(request: Request):
-    conn = open_conn()
-    try:
+    sid = get_session_id(request)
+
+    def _work(conn):
         now = now_utc()
         rows = recent_event_rows(conn, types=("drop", "restock", "price_drop"), limit=6)
         drops = [event_view(conn, r, now) for r in rows]
-        ctx = {
-            "drops": drops,
-            "site": site_context(conn, request),
-            "subscribed": request.query_params.get("subscribed") == "1",
-            "error": request.query_params.get("error") == "1",
-        }
-        return templates.TemplateResponse(request, "landing.html", ctx)
-    finally:
-        conn.close()
+        site = site_context(conn)
+        site["current_user"] = _user_by_sid(conn, sid)
+        return drops, site
+
+    drops, site = await _in_db(_work)
+    site["csrf_token"] = _csrf(request)
+    return templates.TemplateResponse(request, "landing.html", {
+        "drops": drops,
+        "site": site,
+        "subscribed": request.query_params.get("subscribed") == "1",
+        "error": request.query_params.get("error") == "1",
+    })
 
 
 async def subscribe(request: Request):
     form = await request.form()
     if is_bot_submission(form) or _bad_csrf(request, form):
-        return RedirectResponse("/?subscribed=1#join", status_code=303)  # silent drop
+        return RedirectResponse("/?subscribed=1#join", status_code=303)
     telegram = sanitize_str(form.get("telegram") or "", 64) or None
     try:
         email = validate_email(form.get("email") or "")
     except ValueError:
         return RedirectResponse("/?error=1#join", status_code=303)
-    conn = open_conn()
-    try:
+
+    def _work(conn):
         existing = get_subscriber(conn, email)
         if not existing:
             db.execute(
@@ -279,31 +336,34 @@ async def subscribe(request: Request):
             )
             firebase_db.upsert_user(email, {"email": email, "tier": "free",
                                             "created_at": now_utc().isoformat()})
-        return RedirectResponse("/?subscribed=1#join", status_code=303)
-    finally:
-        conn.close()
+
+    await _in_db(_work)
+    return RedirectResponse("/?subscribed=1#join", status_code=303)
 
 
 async def drops_page(request: Request):
-    conn = open_conn()
-    try:
+    sid = get_session_id(request)
+
+    def _work(conn):
         now = now_utc()
         rows = recent_event_rows(conn, limit=50)
         events = [event_view(conn, r, now) for r in rows]
-        return templates.TemplateResponse(
-            request, "drops.html",
-            {"events": events, "site": site_context(conn, request)},
-        )
-    finally:
-        conn.close()
+        site = site_context(conn)
+        site["current_user"] = _user_by_sid(conn, sid)
+        return events, site
+
+    events, site = await _in_db(_work)
+    site["csrf_token"] = _csrf(request)
+    return templates.TemplateResponse(request, "drops.html", {"events": events, "site": site})
 
 
 async def dashboard(request: Request):
-    conn = open_conn()
-    try:
-        sub = get_current_user(conn, request)
+    sid = get_session_id(request)
+
+    def _work(conn):
+        sub = _user_by_sid(conn, sid)
         if not sub:
-            return RedirectResponse("/login?next=/app", status_code=303)
+            return None, None, None, None, None
         now = now_utc()
         rows = recent_event_rows(conn, types=("drop", "restock", "price_drop"),
                                  limit=60, since_hours=24 * 14)
@@ -311,48 +371,61 @@ async def dashboard(request: Request):
                    if filters.matches(sub, r, price=r["price"])][:10]
         movers = digest_mod._top_movers(conn, limit=5)
         upcoming = digest_mod._upcoming(conn, limit=6)
-        ctx = {
-            "sub": sub,
-            "filter_label": filters.describe(sub),
-            "matched": matched,
-            "movers": movers,
-            "upcoming": upcoming,
-            "site": site_context(conn, request),
-        }
-        return templates.TemplateResponse(request, "dashboard.html", ctx)
-    finally:
-        conn.close()
+        site = site_context(conn)
+        site["current_user"] = sub
+        return sub, matched, movers, upcoming, site
+
+    sub, matched, movers, upcoming, site = await _in_db(_work)
+    if not sub:
+        return RedirectResponse("/login?next=/app", status_code=303)
+    site["csrf_token"] = _csrf(request)
+    return templates.TemplateResponse(request, "dashboard.html", {
+        "sub": sub,
+        "filter_label": filters.describe(sub),
+        "matched": matched,
+        "movers": movers,
+        "upcoming": upcoming,
+        "site": site,
+    })
 
 
 async def collection_page(request: Request):
-    conn = open_conn()
-    try:
-        sub = get_current_user(conn, request)
+    sid = get_session_id(request)
+
+    def _work(conn):
+        sub = _user_by_sid(conn, sid)
         if not sub:
-            return RedirectResponse("/login?next=/collection", status_code=303)
+            return None, None, None
         summary = collection_summary(conn, sub["id"])
-        return templates.TemplateResponse(
-            request, "collection.html",
-            {"sub": sub, "summary": summary, "site": site_context(conn, request)},
-        )
-    finally:
-        conn.close()
+        site = site_context(conn)
+        site["current_user"] = sub
+        return sub, summary, site
+
+    sub, summary, site = await _in_db(_work)
+    if not sub:
+        return RedirectResponse("/login?next=/collection", status_code=303)
+    site["csrf_token"] = _csrf(request)
+    return templates.TemplateResponse(request, "collection.html",
+                                      {"sub": sub, "summary": summary, "site": site})
 
 
 async def pricing(request: Request):
-    conn = open_conn()
-    try:
-        sub = get_current_user(conn, request)
-        return templates.TemplateResponse(
-            request, "pricing.html",
-            {"site": site_context(conn, request),
-             "stripe_enabled": get_settings().has_stripe,
-             "upgraded": request.query_params.get("upgraded") == "1",
-             "error": request.query_params.get("error") == "1",
-             "sub": sub},
-        )
-    finally:
-        conn.close()
+    sid = get_session_id(request)
+
+    def _work(conn):
+        site = site_context(conn)
+        site["current_user"] = _user_by_sid(conn, sid)
+        return site
+
+    site = await _in_db(_work)
+    site["csrf_token"] = _csrf(request)
+    return templates.TemplateResponse(request, "pricing.html", {
+        "site": site,
+        "stripe_enabled": get_settings().has_stripe,
+        "upgraded": request.query_params.get("upgraded") == "1",
+        "error": request.query_params.get("error") == "1",
+        "sub": site.get("current_user"),
+    })
 
 
 async def upgrade(request: Request):
@@ -360,42 +433,48 @@ async def upgrade(request: Request):
     if _bad_csrf(request, form):
         return RedirectResponse("/pricing?error=1", status_code=303)
     settings = get_settings()
-    conn = open_conn()
-    try:
-        sub = get_current_user(conn, request)
-        if not sub:
-            return RedirectResponse("/login?next=/pricing", status_code=303)
-        email = sub["email"]
+    sid = get_session_id(request)
 
-        # Real payments: hand the buyer to Stripe's hosted checkout.
-        if settings.has_stripe:
-            try:
-                url, _ = billing.create_checkout_session(settings, email)
-                if url:
-                    firebase_db.log_event(email, "checkout_started", ip=_client_ip(request))
-                    return RedirectResponse(url, status_code=303)
-            except Exception:
-                pass
-            return RedirectResponse("/pricing?error=1", status_code=303)
+    def _get_sub(conn):
+        return _user_by_sid(conn, sid)
 
-        # No Stripe configured -> demo flip so the flow is still walkable.
+    sub = await _in_db(_get_sub)
+    if not sub:
+        return RedirectResponse("/login?next=/pricing", status_code=303)
+    email = sub["email"]
+
+    if settings.has_stripe:
+        try:
+            url, _ = billing.create_checkout_session(settings, email)
+            if url:
+                firebase_db.log_event(email, "checkout_started", ip=_client_ip(request))
+                return RedirectResponse(url, status_code=303)
+        except Exception:
+            pass
+        return RedirectResponse("/pricing?error=1", status_code=303)
+
+    # Demo flip (no Stripe configured)
+    def _upgrade(conn):
         db.execute(conn,
             "UPDATE subscribers SET tier='premium', premium_since=? WHERE id=?",
             (now_utc().isoformat(), sub["id"]))
-        firebase_db.upsert_user(email, {"tier": "premium",
-                                        "premium_since": now_utc().isoformat()})
-        return RedirectResponse("/pricing?upgraded=1", status_code=303)
-    finally:
-        conn.close()
+
+    await _in_db(_upgrade)
+    firebase_db.upsert_user(email, {"tier": "premium", "premium_since": now_utc().isoformat()})
+    return RedirectResponse("/pricing?upgraded=1", status_code=303)
 
 
 async def upgrade_success(request: Request):
-    conn = open_conn()
-    try:
-        return templates.TemplateResponse(
-            request, "upgrade_success.html", {"site": site_context(conn, request)})
-    finally:
-        conn.close()
+    sid = get_session_id(request)
+
+    def _work(conn):
+        site = site_context(conn)
+        site["current_user"] = _user_by_sid(conn, sid)
+        return site
+
+    site = await _in_db(_work)
+    site["csrf_token"] = _csrf(request)
+    return templates.TemplateResponse(request, "upgrade_success.html", {"site": site})
 
 
 async def stripe_webhook(request: Request):
@@ -409,8 +488,8 @@ async def stripe_webhook(request: Request):
 
     etype = event.get("type")
     obj = (event.get("data") or {}).get("object") or {}
-    conn = open_conn()
-    try:
+
+    def _work(conn):
         if etype == "checkout.session.completed":
             email = (obj.get("client_reference_id") or obj.get("customer_email") or "").lower()
             if email and "@" in email:
@@ -439,9 +518,9 @@ async def stripe_webhook(request: Request):
                 if sub_row:
                     firebase_db.upsert_user(sub_row["email"], {"tier": "free"})
                     firebase_db.log_event(sub_row["email"], "subscription_cancelled")
-        return JSONResponse({"received": True})
-    finally:
-        conn.close()
+
+    await _in_db(_work)
+    return JSONResponse({"received": True})
 
 
 async def digest_page(request: Request):
@@ -449,47 +528,44 @@ async def digest_page(request: Request):
     if period not in ("daily", "weekly"):
         period = "daily"
     settings = get_settings()
-    conn = open_conn()
-    try:
+    sid = get_session_id(request)
+
+    def _work(conn):
         d = digest_mod.build_digest(conn, settings, period)
-        return templates.TemplateResponse(
-            request, "digest.html",
-            {"digest": d, "body_html": md_lite(d["body"]), "period": period,
-             "site": site_context(conn, request)},
-        )
-    finally:
-        conn.close()
+        site = site_context(conn)
+        site["current_user"] = _user_by_sid(conn, sid)
+        return d, site
+
+    d, site = await _in_db(_work)
+    site["csrf_token"] = _csrf(request)
+    return templates.TemplateResponse(request, "digest.html", {
+        "digest": d, "body_html": md_lite(d["body"]), "period": period, "site": site,
+    })
 
 
 async def go_redirect(request: Request):
     product_id = int(request.path_params["product_id"])
     target = request.query_params.get("to", "ebay")
     settings = get_settings()
-    conn = open_conn()
-    try:
+
+    def _work(conn):
         product = db.one(conn, "SELECT * FROM products WHERE id = ?", (product_id,))
         if not product:
-            return JSONResponse({"error": "unknown product"}, status_code=404)
+            return None, None
         db.execute(
             conn,
             "INSERT INTO affiliate_clicks (product_id, target, created_at) VALUES (?,?,?)",
             (product_id, target, now_utc().isoformat()),
         )
-        url = affiliates.build_url(settings, product, target)
-        return RedirectResponse(url, status_code=302)
-    finally:
-        conn.close()
+        return product, affiliates.build_url(settings, product, target)
+
+    product, url = await _in_db(_work)
+    if not product:
+        return JSONResponse({"error": "unknown product"}, status_code=404)
+    return RedirectResponse(url, status_code=302)
 
 
-# ---- Inbound webhook: real monitoring -> real alert ----------------------- #
 async def hook_restock(request: Request):
-    """Receive a restock signal from any source (a no-code page watcher like
-    Distill/Visualping, Zapier, n8n, a Shopify webhook, a cron script) and fan it
-    out to Telegram + Discord + email. Protected by an optional shared secret.
-
-    Body (JSON or form): either a known `sku`, or at least a `name`. Optional:
-    price, retailer, region, url, event_type (restock|drop|price_drop).
-    """
     settings = get_settings()
     provided = request.headers.get("x-drophound-secret") or request.query_params.get("secret")
     if settings.hook_secret and provided != settings.hook_secret:
@@ -513,12 +589,10 @@ async def hook_restock(request: Request):
     except (TypeError, ValueError):
         price = None
 
-    conn = open_conn()
-    try:
+    def _work(conn):
         product = db.one(conn, "SELECT * FROM products WHERE sku = ?", (sku,)) if sku else None
         if not product and not name:
-            return JSONResponse(
-                {"error": "provide a known 'sku' or at least a 'name'"}, status_code=400)
+            return "bad_request", None, None, []
 
         if product:
             pdict = dict(product)
@@ -540,7 +614,7 @@ async def hook_restock(request: Request):
             region = str(payload.get("region") or "")
             where = (f" at {retailer}" if retailer else "") + (f" ({region})" if region else "")
             verb = event_type.replace("_", " ").upper()
-            text = f"🔔 {verb}: {name} — {money(price)}{where}.".strip()
+            text = f"🔔 {verb}: {name} - {money(price)}{where}.".strip()
             msg = AlertMessage(title=f"{verb}: {name}", text=text, url=payload.get("url"))
             label = name
 
@@ -554,10 +628,12 @@ async def hook_restock(request: Request):
                 (event_id, None, r.channel, r.status, r.detail, now_utc().isoformat()),
             )
             results.append({"channel": r.channel, "status": r.status})
-        return JSONResponse({"status": "ok", "product": label,
-                             "event_type": event_type, "channels": results})
-    finally:
-        conn.close()
+        return "ok", label, event_type, results
+
+    status, label, etype, results = await _in_db(_work)
+    if status == "bad_request":
+        return JSONResponse({"error": "provide a known 'sku' or at least a 'name'"}, status_code=400)
+    return JSONResponse({"status": "ok", "product": label, "event_type": etype, "channels": results})
 
 
 # ---- SEO: robots + sitemap ------------------------------------------------ #
@@ -601,37 +677,39 @@ async def api_health(request: Request):
 
 
 async def api_drops(request: Request):
-    conn = open_conn()
-    try:
+    limit = int(request.query_params.get("limit", 25))
+
+    def _work(conn):
         now = now_utc()
-        rows = recent_event_rows(conn, limit=int(request.query_params.get("limit", 25)))
-        return JSONResponse({"drops": [
+        rows = recent_event_rows(conn, limit=limit)
+        return [
             {k: v for k, v in event_view(conn, r, now).items() if k != "color"}
             for r in rows
-        ]})
-    finally:
-        conn.close()
+        ]
+
+    return JSONResponse({"drops": await _in_db(_work)})
 
 
 async def api_products(request: Request):
-    conn = open_conn()
-    try:
-        rows = db.q(conn, "SELECT * FROM products ORDER BY brand, character, name")
-        return JSONResponse({"products": [dict(r) for r in rows]})
-    finally:
-        conn.close()
+    def _work(conn):
+        return [dict(r) for r in db.q(conn, "SELECT * FROM products ORDER BY brand, character, name")]
+
+    return JSONResponse({"products": await _in_db(_work)})
 
 
 async def api_collection_value(request: Request):
     subscriber_id = int(request.path_params["subscriber_id"])
-    conn = open_conn()
-    try:
+
+    def _work(conn):
         sub = db.one(conn, "SELECT * FROM subscribers WHERE id = ?", (subscriber_id,))
         if not sub:
-            return JSONResponse({"error": "unknown subscriber"}, status_code=404)
-        return JSONResponse(collection_summary(conn, subscriber_id))
-    finally:
-        conn.close()
+            return None
+        return collection_summary(conn, subscriber_id)
+
+    result = await _in_db(_work)
+    if result is None:
+        return JSONResponse({"error": "unknown subscriber"}, status_code=404)
+    return JSONResponse(result)
 
 
 # ---- Catalog browse + per-product watchlist ------------------------------- #
@@ -646,30 +724,6 @@ _RESALE_LOW  = ("(SELECT low    FROM resale_prices r WHERE r.product_id=p.id "
                 "ORDER BY r.captured_at DESC, r.id DESC LIMIT 1)")
 _RESALE_HIGH = ("(SELECT high   FROM resale_prices r WHERE r.product_id=p.id "
                 "ORDER BY r.captured_at DESC, r.id DESC LIMIT 1)")
-
-
-def get_current_user(conn: sqlite3.Connection, request: Request) -> sqlite3.Row | None:
-    """Return the logged-in subscriber for this browser session, or None."""
-    sid = get_session_id(request)
-    return db.one(conn, "SELECT * FROM subscribers WHERE session_id = ?", (sid,))
-
-
-def get_or_create_subscriber(conn: sqlite3.Connection, email: str,
-                             session_id: str | None = None) -> sqlite3.Row | None:
-    email = (email or "").strip().lower()
-    if "@" not in email or "." not in email.split("@")[-1]:
-        return None
-    row = get_subscriber(conn, email)
-    if row:
-        # Stamp session_id on first use if not set
-        if session_id and not (row["session_id"] if "session_id" in row.keys() else None):
-            db.execute(conn, "UPDATE subscribers SET session_id=? WHERE id=?",
-                       (session_id, row["id"]))
-        return get_subscriber(conn, email)
-    db.execute(conn,
-               "INSERT INTO subscribers (email, tier, created_at, session_id) VALUES (?, 'free', ?, ?)",
-               (email, now_utc().isoformat(), session_id))
-    return get_subscriber(conn, email)
 
 
 def _product_item(row: sqlite3.Row, watched: set[int]) -> dict:
@@ -707,44 +761,43 @@ def catalog_page(conn, q, character, in_stock_only, page, watched):
     return [_product_item(r, watched) for r in rows], total, pages
 
 
-def _watched_ids(conn, email):
-    sub = get_subscriber(conn, email) if email and "@" in email else None
-    if not sub:
-        return set(), None
-    ids = {r["product_id"] for r in
-           db.q(conn, "SELECT product_id FROM watchlist WHERE subscriber_id=?", (sub["id"],))}
-    return ids, sub
-
-
 async def register_page(request: Request):
-    conn = open_conn()
-    try:
-        if request.method == "POST":
-            form = await request.form()
-            if is_bot_submission(form) or _bad_csrf(request, form):
-                return RedirectResponse("/register?next=" +
-                    sanitize_str(request.query_params.get("next") or "/watch", 200),
-                    status_code=303)
-            try:
-                email = validate_email(form.get("email") or "")
-            except ValueError as exc:
-                return templates.TemplateResponse(request, "login.html",
-                    {"site": site_context(conn, request), "error": str(exc), "tab": "register"},
-                    status_code=400)
-            try:
-                password = validate_password(form.get("password") or "")
-            except ValueError as exc:
-                return templates.TemplateResponse(request, "login.html",
-                    {"site": site_context(conn, request), "error": str(exc), "tab": "register"},
-                    status_code=400)
+    if request.method == "POST":
+        form = await request.form()
+        sid = get_session_id(request)
+        if is_bot_submission(form) or _bad_csrf(request, form):
+            return RedirectResponse("/register?next=" +
+                sanitize_str(request.query_params.get("next") or "/watch", 200),
+                status_code=303)
+        try:
+            email = validate_email(form.get("email") or "")
+        except ValueError as exc:
+            def _ctx_err(conn):
+                site = site_context(conn)
+                site["current_user"] = _user_by_sid(conn, sid)
+                return site
+            site = await _in_db(_ctx_err)
+            site["csrf_token"] = _csrf(request)
+            return templates.TemplateResponse(request, "login.html",
+                {"site": site, "error": str(exc), "tab": "register"}, status_code=400)
+        try:
+            password = validate_password(form.get("password") or "")
+        except ValueError as exc:
+            def _ctx_err2(conn):
+                site = site_context(conn)
+                site["current_user"] = _user_by_sid(conn, sid)
+                return site
+            site = await _in_db(_ctx_err2)
+            site["csrf_token"] = _csrf(request)
+            return templates.TemplateResponse(request, "login.html",
+                {"site": site, "error": str(exc), "tab": "register"}, status_code=400)
+
+        # hash_password is scrypt (CPU-intensive) — runs inside the thread
+        def _register_work(conn):
             existing = get_subscriber(conn, email)
             if existing and existing["password_hash"]:
-                return templates.TemplateResponse(request, "login.html",
-                    {"site": site_context(conn, request),
-                     "error": "An account with that email already exists. Log in instead.",
-                     "tab": "register"}, status_code=400)
-            sid = get_session_id(request)
-            pw_hash = hash_password(password)
+                return "exists", None
+            pw_hash = hash_password(password)  # scrypt — expensive, safe in thread
             if existing:
                 db.execute(conn,
                     "UPDATE subscribers SET password_hash=?, session_id=? WHERE id=?",
@@ -754,99 +807,168 @@ async def register_page(request: Request):
                     """INSERT INTO subscribers (email, tier, created_at, session_id, password_hash)
                        VALUES (?, 'free', ?, ?, ?)""",
                     (email, now_utc().isoformat(), sid, pw_hash))
-            firebase_db.upsert_user(email, {"email": email, "tier": "free",
-                                            "created_at": now_utc().isoformat()})
-            firebase_db.log_event(email, "register", ip=_client_ip(request),
-                                  user_agent=request.headers.get("user-agent"))
-            next_url = sanitize_str(request.query_params.get("next") or "/watch", 200)
-            if not next_url.startswith("/"):
-                next_url = "/watch"
-            return RedirectResponse(next_url, status_code=303)
-        return templates.TemplateResponse(request, "login.html",
-            {"site": site_context(conn, request), "tab": "register"})
-    finally:
-        conn.close()
+            site = site_context(conn)
+            site["current_user"] = _user_by_sid(conn, sid)
+            return "ok", site
+
+        result, data = await _in_db(_register_work)
+        if result == "exists":
+            def _ctx_dup(conn):
+                site = site_context(conn)
+                site["current_user"] = _user_by_sid(conn, sid)
+                return site
+            site = await _in_db(_ctx_dup)
+            site["csrf_token"] = _csrf(request)
+            return templates.TemplateResponse(request, "login.html",
+                {"site": site,
+                 "error": "An account with that email already exists. Log in instead.",
+                 "tab": "register"}, status_code=400)
+
+        firebase_db.upsert_user(email, {"email": email, "tier": "free",
+                                        "created_at": now_utc().isoformat()})
+        firebase_db.log_event(email, "register", ip=_client_ip(request),
+                              user_agent=request.headers.get("user-agent"))
+        next_url = sanitize_str(request.query_params.get("next") or "/watch", 200)
+        if not next_url.startswith("/"):
+            next_url = "/watch"
+        return RedirectResponse(next_url, status_code=303)
+
+    # GET
+    sid = get_session_id(request)
+
+    def _get_ctx(conn):
+        site = site_context(conn)
+        site["current_user"] = _user_by_sid(conn, sid)
+        return site
+
+    site = await _in_db(_get_ctx)
+    site["csrf_token"] = _csrf(request)
+    return templates.TemplateResponse(request, "login.html", {"site": site, "tab": "register"})
 
 
 async def login_page(request: Request):
-    conn = open_conn()
-    try:
-        if request.method == "POST":
-            form = await request.form()
-            if _bad_csrf(request, form):
-                return templates.TemplateResponse(request, "login.html",
-                    {"site": site_context(conn, request),
-                     "error": "Session expired. Please try again.", "tab": "login"},
-                    status_code=403)
-            try:
-                email = validate_email(form.get("email") or "")
-            except ValueError as exc:
-                return templates.TemplateResponse(request, "login.html",
-                    {"site": site_context(conn, request), "error": str(exc), "tab": "login"},
-                    status_code=400)
+    if request.method == "POST":
+        form = await request.form()
+        sid = get_session_id(request)
+        if _bad_csrf(request, form):
+            def _ctx_csrf(conn):
+                site = site_context(conn)
+                site["current_user"] = _user_by_sid(conn, sid)
+                return site
+            site = await _in_db(_ctx_csrf)
+            site["csrf_token"] = _csrf(request)
+            return templates.TemplateResponse(request, "login.html",
+                {"site": site, "error": "Session expired. Please try again.", "tab": "login"},
+                status_code=403)
+        try:
+            email = validate_email(form.get("email") or "")
+        except ValueError as exc:
+            def _ctx_email(conn):
+                site = site_context(conn)
+                site["current_user"] = _user_by_sid(conn, sid)
+                return site
+            site = await _in_db(_ctx_email)
+            site["csrf_token"] = _csrf(request)
+            return templates.TemplateResponse(request, "login.html",
+                {"site": site, "error": str(exc), "tab": "login"}, status_code=400)
 
-            if is_locked(email):
-                firebase_db.log_event(email, "login_blocked", ip=_client_ip(request))
-                return templates.TemplateResponse(request, "login.html",
-                    {"site": site_context(conn, request),
-                     "error": "Too many failed attempts. Try again in 15 minutes.",
-                     "tab": "login"}, status_code=429)
+        if is_locked(email):
+            firebase_db.log_event(email, "login_blocked", ip=_client_ip(request))
+            def _ctx_locked(conn):
+                site = site_context(conn)
+                site["current_user"] = _user_by_sid(conn, sid)
+                return site
+            site = await _in_db(_ctx_locked)
+            site["csrf_token"] = _csrf(request)
+            return templates.TemplateResponse(request, "login.html",
+                {"site": site,
+                 "error": "Too many failed attempts. Try again in 15 minutes.",
+                 "tab": "login"}, status_code=429)
 
-            password = form.get("password") or ""
+        password = form.get("password") or ""
+
+        # verify_password is scrypt (CPU-intensive) — runs inside the thread
+        def _login_work(conn):
             sub = get_subscriber(conn, email)
             pw_hash = (sub["password_hash"] if sub and "password_hash" in sub.keys() else None)
             if not sub or not pw_hash or not verify_password(password, pw_hash):
-                record_failure(email)
-                firebase_db.log_event(email, "login_failed", ip=_client_ip(request))
-                return templates.TemplateResponse(request, "login.html",
-                    {"site": site_context(conn, request),
-                     "error": "Incorrect email or password.", "tab": "login"}, status_code=400)
-
-            clear_failures(email)
-            sid = get_session_id(request)
+                # Returns False without updating DB — caller records failure
+                return "fail", site_context(conn)
             db.execute(conn, "UPDATE subscribers SET session_id=? WHERE id=?", (sid, sub["id"]))
-            firebase_db.upsert_user(email, {
-                "email": email,
-                "tier": sub["tier"],
-                "last_login": now_utc().isoformat(),
-            })
-            firebase_db.log_event(email, "login_success", ip=_client_ip(request))
-            next_url = sanitize_str(request.query_params.get("next") or "/watch", 200)
-            if not next_url.startswith("/"):
-                next_url = "/watch"
-            return RedirectResponse(next_url, status_code=303)
-        return templates.TemplateResponse(request, "login.html",
-            {"site": site_context(conn, request), "tab": "login"})
-    finally:
-        conn.close()
+            site = site_context(conn)
+            site["current_user"] = dict(sub)
+            return "ok", site, dict(sub)
+
+        outcome = await _in_db(_login_work)
+
+        if outcome[0] == "fail":
+            record_failure(email)
+            firebase_db.log_event(email, "login_failed", ip=_client_ip(request))
+            site = outcome[1]
+            site["current_user"] = None
+            site["csrf_token"] = _csrf(request)
+            return templates.TemplateResponse(request, "login.html",
+                {"site": site, "error": "Incorrect email or password.", "tab": "login"},
+                status_code=400)
+
+        _, site, sub = outcome
+        clear_failures(email)
+        firebase_db.upsert_user(email, {
+            "email": email, "tier": sub["tier"], "last_login": now_utc().isoformat(),
+        })
+        firebase_db.log_event(email, "login_success", ip=_client_ip(request))
+        site["csrf_token"] = _csrf(request)
+        next_url = sanitize_str(request.query_params.get("next") or "/watch", 200)
+        if not next_url.startswith("/"):
+            next_url = "/watch"
+        return RedirectResponse(next_url, status_code=303)
+
+    # GET
+    sid = get_session_id(request)
+
+    def _get_ctx(conn):
+        site = site_context(conn)
+        site["current_user"] = _user_by_sid(conn, sid)
+        return site
+
+    site = await _in_db(_get_ctx)
+    site["csrf_token"] = _csrf(request)
+    return templates.TemplateResponse(request, "login.html", {"site": site, "tab": "login"})
 
 
 async def logout(request: Request):
     form = await request.form()
     if _bad_csrf(request, form):
         return RedirectResponse("/", status_code=303)
-    conn = open_conn()
-    try:
-        sid = get_session_id(request)
+    sid = get_session_id(request)
+
+    def _work(conn):
         sub = db.one(conn, "SELECT * FROM subscribers WHERE session_id=?", (sid,))
         if sub:
             db.execute(conn, "UPDATE subscribers SET session_id=NULL WHERE id=?", (sub["id"],))
-            firebase_db.log_event(sub["email"], "logout", ip=_client_ip(request))
-        response = RedirectResponse("/login", status_code=303)
-        response.delete_cookie("dh_sid")
-        return response
-    finally:
-        conn.close()
+            return sub["email"]
+        return None
+
+    email = await _in_db(_work)
+    if email:
+        firebase_db.log_event(email, "logout", ip=_client_ip(request))
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie("dh_sid")
+    return response
 
 
 async def watch_page(request: Request):
-    conn = open_conn()
-    try:
-        return templates.TemplateResponse(
-            request, "watch.html",
-            {"site": site_context(conn, request), "popular": POPULAR_CHARACTERS})
-    finally:
-        conn.close()
+    sid = get_session_id(request)
+
+    def _work(conn):
+        site = site_context(conn)
+        site["current_user"] = _user_by_sid(conn, sid)
+        return site
+
+    site = await _in_db(_work)
+    site["csrf_token"] = _csrf(request)
+    return templates.TemplateResponse(request, "watch.html",
+                                      {"site": site, "popular": POPULAR_CHARACTERS})
 
 
 async def api_catalog(request: Request):
@@ -859,17 +981,15 @@ async def api_catalog(request: Request):
     except ValueError:
         page = 1
 
-    # Cache unfiltered catalog for 30s; skip cache for logged-in users (watched state varies)
     cache_key = f"catalog:{q}:{character}:{in_stock}:{page}"
-    conn = open_conn()
-    try:
-        sub = get_current_user(conn, request)
-        logged_in = sub is not None
+    sid = get_session_id(request)
 
+    def _work(conn):
+        sub = _user_by_sid(conn, sid)
+        logged_in = sub is not None
         hit = cache.get(cache_key) if not logged_in else None
         if hit:
-            return JSONResponse({**hit, "logged_in": False, "watch_count": 0})
-
+            return {**hit, "logged_in": False, "watch_count": 0}, True
         watched = {r["product_id"] for r in
                    db.q(conn, "SELECT product_id FROM watchlist WHERE subscriber_id=?",
                         (sub["id"],))} if sub else set()
@@ -880,27 +1000,31 @@ async def api_catalog(request: Request):
         }
         if not logged_in:
             cache.set(cache_key, payload, ttl=30)
-        return JSONResponse(payload)
-    finally:
-        conn.close()
+        return payload, False
+
+    payload, from_cache = await _in_db(_work)
+    return JSONResponse(payload)
 
 
 async def api_watchlist(request: Request):
-    conn = open_conn()
-    try:
-        sub = get_current_user(conn, request)
+    sid = get_session_id(request)
+
+    def _work(conn):
+        sub = _user_by_sid(conn, sid)
         if not sub:
-            return JSONResponse({"error": "Authentication required.", "login_required": True},
-                                status_code=401)
+            return None
         rows = db.q(conn, f"""SELECT p.id, p.name, p.brand, p.character, p.retailer, p.region,
             p.retail_price, p.image_hint, {_STATUS_SUB} AS status, {_RESALE_SUB} AS resale_median,
             {_RESALE_LOW} AS resale_low, {_RESALE_HIGH} AS resale_high
             FROM watchlist w JOIN products p ON p.id = w.product_id
             WHERE w.subscriber_id = ? ORDER BY w.created_at DESC""", (sub["id"],))
-        items = [_product_item(r, {r["id"] for r in rows}) for r in rows]
-        return JSONResponse({"products": items, "count": len(items)})
-    finally:
-        conn.close()
+        return [_product_item(r, {r["id"] for r in rows}) for r in rows]
+
+    items = await _in_db(_work)
+    if items is None:
+        return JSONResponse({"error": "Authentication required.", "login_required": True},
+                            status_code=401)
+    return JSONResponse({"products": items, "count": len(items)})
 
 
 async def watch_add(request: Request):
@@ -913,15 +1037,14 @@ async def watch_add(request: Request):
             raise ValueError
     except (TypeError, ValueError):
         return JSONResponse({"error": "Invalid product ID."}, status_code=400)
+    sid = get_session_id(request)
 
-    conn = open_conn()
-    try:
-        sub = get_current_user(conn, request)
+    def _work(conn):
+        sub = _user_by_sid(conn, sid)
         if not sub:
-            return JSONResponse({"error": "Log in to watch products.", "login_required": True},
-                                status_code=401)
+            return "unauth", None
         if not db.one(conn, "SELECT 1 FROM products WHERE id = ?", (pid,)):
-            return JSONResponse({"error": "Product not found."}, status_code=404)
+            return "notfound", None
         try:
             db.execute(conn, """INSERT INTO watchlist (subscriber_id, product_id, created_at)
                        VALUES (?,?,?)""", (sub["id"], pid, now_utc().isoformat()))
@@ -930,9 +1053,15 @@ async def watch_add(request: Request):
         count = db.one(conn, "SELECT COUNT(*) c FROM watchlist WHERE subscriber_id=?",
                        (sub["id"],))["c"]
         cache.invalidate(f"watchlist:{sub['id']}")
-        return JSONResponse({"watched": True, "count": count})
-    finally:
-        conn.close()
+        return "ok", count
+
+    status, count = await _in_db(_work)
+    if status == "unauth":
+        return JSONResponse({"error": "Log in to watch products.", "login_required": True},
+                            status_code=401)
+    if status == "notfound":
+        return JSONResponse({"error": "Product not found."}, status_code=404)
+    return JSONResponse({"watched": True, "count": count})
 
 
 async def watch_remove(request: Request):
@@ -945,21 +1074,24 @@ async def watch_remove(request: Request):
             raise ValueError
     except (TypeError, ValueError):
         return JSONResponse({"error": "Invalid product ID."}, status_code=400)
+    sid = get_session_id(request)
 
-    conn = open_conn()
-    try:
-        sub = get_current_user(conn, request)
+    def _work(conn):
+        sub = _user_by_sid(conn, sid)
         if not sub:
-            return JSONResponse({"error": "Log in to watch products.", "login_required": True},
-                                status_code=401)
+            return "unauth", None
         db.execute(conn, "DELETE FROM watchlist WHERE subscriber_id=? AND product_id=?",
                    (sub["id"], pid))
         count = db.one(conn, "SELECT COUNT(*) c FROM watchlist WHERE subscriber_id=?",
                        (sub["id"],))["c"]
         cache.invalidate(f"watchlist:{sub['id']}")
-        return JSONResponse({"watched": False, "count": count})
-    finally:
-        conn.close()
+        return "ok", count
+
+    status, count = await _in_db(_work)
+    if status == "unauth":
+        return JSONResponse({"error": "Log in to watch products.", "login_required": True},
+                            status_code=401)
+    return JSONResponse({"watched": False, "count": count})
 
 
 # --------------------------------------------------------------------------- #
@@ -968,32 +1100,46 @@ async def watch_remove(request: Request):
 async def _not_found(request: Request, exc: Exception) -> Response:
     if request.url.path.startswith("/api/"):
         return JSONResponse({"error": "Not found."}, status_code=404)
-    conn = open_conn()
-    try:
-        return templates.TemplateResponse(
-            request, "error.html",
-            {"site": site_context(conn, request), "code": 404,
-             "message": "We couldn't find that page.",
-             "detail": "The URL might have changed or the page may have been removed."},
-            status_code=404)
-    finally:
-        conn.close()
+    sid = get_session_id(request)
+
+    def _work(conn):
+        site = site_context(conn)
+        site["current_user"] = _user_by_sid(conn, sid)
+        return site
+
+    site = await _in_db(_work)
+    site["csrf_token"] = _csrf(request)
+    return templates.TemplateResponse(
+        request, "error.html",
+        {"site": site, "code": 404,
+         "message": "We couldn't find that page.",
+         "detail": "The URL might have changed or the page may have been removed."},
+        status_code=404)
 
 
 async def _server_error(request: Request, exc: Exception) -> Response:
     logger.exception("unhandled error %s %s", request.method, request.url.path)
     if request.url.path.startswith("/api/"):
         return JSONResponse({"error": "An unexpected error occurred."}, status_code=500)
-    conn = open_conn()
+    sid = get_session_id(request)
+
+    def _work(conn):
+        site = site_context(conn)
+        site["current_user"] = _user_by_sid(conn, sid)
+        return site
+
     try:
-        return templates.TemplateResponse(
-            request, "error.html",
-            {"site": site_context(conn, request), "code": 500,
-             "message": "Something went wrong on our end.",
-             "detail": "We've logged the error. Please try again in a moment."},
-            status_code=500)
-    finally:
-        conn.close()
+        site = await _in_db(_work)
+    except Exception:
+        site = {"base_url": "", "premium_price": 0, "tracked": 0,
+                "alerts_24h": 0, "subscribers": 0, "current_user": None}
+    site["csrf_token"] = _csrf(request)
+    return templates.TemplateResponse(
+        request, "error.html",
+        {"site": site, "code": 500,
+         "message": "Something went wrong on our end.",
+         "detail": "We've logged the error. Please try again in a moment."},
+        status_code=500)
 
 
 def _admin_check(request: Request, form=None) -> str | None:
@@ -1017,28 +1163,27 @@ async def admin_page(request: Request):
         key = _admin_check(request)
 
     if not key:
-        # Show login form if no/wrong key
         return templates.TemplateResponse(request, "admin_login.html",
             {"error": bool(request.query_params.get("key") or (form and form.get("key")))},
             status_code=403 if (request.query_params.get("key") or (form and form.get("key"))) else 200)
 
-    conn = open_conn()
-    try:
+    def _work(conn):
         users_raw = db.q(conn, """
             SELECT s.*, (SELECT COUNT(*) FROM watchlist w WHERE w.subscriber_id=s.id) AS watch_count
             FROM subscribers s ORDER BY s.created_at DESC
         """)
         users = [dict(u) for u in users_raw]
-        total = len(users)
-        premium = sum(1 for u in users if u["tier"] == "premium")
-        return templates.TemplateResponse(request, "admin.html", {
-            "users": users, "total": total, "premium": premium,
-            "free": total - premium, "key": key,
-            "csrf_token": _csrf(request),
-            "message": request.query_params.get("msg"),
-        })
-    finally:
-        conn.close()
+        return users
+
+    users = await _in_db(_work)
+    total = len(users)
+    premium = sum(1 for u in users if u["tier"] == "premium")
+    return templates.TemplateResponse(request, "admin.html", {
+        "users": users, "total": total, "premium": premium,
+        "free": total - premium, "key": key,
+        "csrf_token": _csrf(request),
+        "message": request.query_params.get("msg"),
+    })
 
 
 async def admin_delete_user(request: Request):
@@ -1051,50 +1196,61 @@ async def admin_delete_user(request: Request):
     email = sanitize_str(form.get("email") or "", 320).lower()
     if not email or "@" not in email:
         return templates.TemplateResponse(request, "admin_login.html", {"error": True}, status_code=400)
-    conn = open_conn()
-    try:
+
+    def _work(conn):
         sub = get_subscriber(conn, email)
         if not sub:
-            return PlainTextResponse("User not found", status_code=404)
+            return None, []
         db.execute(conn, "DELETE FROM watchlist WHERE subscriber_id=?", (sub["id"],))
         db.execute(conn, "DELETE FROM collection_items WHERE subscriber_id=?", (sub["id"],))
         db.execute(conn, "DELETE FROM subscribers WHERE id=?", (sub["id"],))
-        firebase_db.log_event(email, "admin_deleted", detail=f"by_admin ip={_client_ip(request)}")
-        firebase_db.delete_user(email)
-        # Re-render admin page directly so the key stays in POST, not URL
         users_raw = db.q(conn, """
             SELECT s.*, (SELECT COUNT(*) FROM watchlist w WHERE w.subscriber_id=s.id) AS watch_count
             FROM subscribers s ORDER BY s.created_at DESC
         """)
-        users = [dict(u) for u in users_raw]
-        total = len(users)
-        premium = sum(1 for u in users if u["tier"] == "premium")
-        return templates.TemplateResponse(request, "admin.html", {
-            "users": users, "total": total, "premium": premium,
-            "free": total - premium, "key": key,
-            "csrf_token": _csrf(request),
-            "message": f"Deleted {email}",
-        })
-    finally:
-        conn.close()
+        return sub["email"], [dict(u) for u in users_raw]
+
+    deleted_email, users = await _in_db(_work)
+    if deleted_email is None:
+        return PlainTextResponse("User not found", status_code=404)
+
+    firebase_db.log_event(email, "admin_deleted", detail=f"by_admin ip={_client_ip(request)}")
+    firebase_db.delete_user(email)
+
+    total = len(users)
+    premium = sum(1 for u in users if u["tier"] == "premium")
+    return templates.TemplateResponse(request, "admin.html", {
+        "users": users, "total": total, "premium": premium,
+        "free": total - premium, "key": key,
+        "csrf_token": _csrf(request),
+        "message": f"Deleted {email}",
+    })
 
 
 async def privacy_page(request: Request):
-    conn = open_conn()
-    try:
-        return templates.TemplateResponse(
-            request, "privacy.html", {"site": site_context(conn, request)})
-    finally:
-        conn.close()
+    sid = get_session_id(request)
+
+    def _work(conn):
+        site = site_context(conn)
+        site["current_user"] = _user_by_sid(conn, sid)
+        return site
+
+    site = await _in_db(_work)
+    site["csrf_token"] = _csrf(request)
+    return templates.TemplateResponse(request, "privacy.html", {"site": site})
 
 
 async def terms_page(request: Request):
-    conn = open_conn()
-    try:
-        return templates.TemplateResponse(
-            request, "terms.html", {"site": site_context(conn, request)})
-    finally:
-        conn.close()
+    sid = get_session_id(request)
+
+    def _work(conn):
+        site = site_context(conn)
+        site["current_user"] = _user_by_sid(conn, sid)
+        return site
+
+    site = await _in_db(_work)
+    site["csrf_token"] = _csrf(request)
+    return templates.TemplateResponse(request, "terms.html", {"site": site})
 
 
 async def delete_account(request: Request):
@@ -1102,22 +1258,26 @@ async def delete_account(request: Request):
     form = await request.form()
     if _bad_csrf(request, form):
         return JSONResponse({"error": "Invalid CSRF token."}, status_code=403)
-    conn = open_conn()
-    try:
-        sub = get_current_user(conn, request)
+    sid = get_session_id(request)
+
+    def _work(conn):
+        sub = _user_by_sid(conn, sid)
         if not sub:
-            return JSONResponse({"error": "Not authenticated."}, status_code=401)
+            return None
         email = sub["email"]
         db.execute(conn, "DELETE FROM watchlist WHERE subscriber_id=?", (sub["id"],))
         db.execute(conn, "DELETE FROM collection_items WHERE subscriber_id=?", (sub["id"],))
         db.execute(conn, "DELETE FROM subscribers WHERE id=?", (sub["id"],))
-        firebase_db.log_event(email, "account_deleted", ip=_client_ip(request))
-        firebase_db.delete_user(email)
-        response = RedirectResponse("/", status_code=303)
-        response.delete_cookie("dh_sid")
-        return response
-    finally:
-        conn.close()
+        return email
+
+    email = await _in_db(_work)
+    if not email:
+        return JSONResponse({"error": "Not authenticated."}, status_code=401)
+    firebase_db.log_event(email, "account_deleted", ip=_client_ip(request))
+    firebase_db.delete_user(email)
+    response = RedirectResponse("/", status_code=303)
+    response.delete_cookie("dh_sid")
+    return response
 
 
 @asynccontextmanager

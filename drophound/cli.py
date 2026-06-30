@@ -347,10 +347,16 @@ def cmd_restore(args, settings) -> int:
 
 
 def cmd_serve(args, settings) -> int:
+    import os
     import uvicorn
-    print(f"→ DropHound on http://{args.host}:{args.port}  (db: {settings.db_path})")
+    workers = getattr(args, "workers", None) or int(os.environ.get("WEB_CONCURRENCY", "1"))
+    reload = getattr(args, "reload", False)
+    if workers > 1 and reload:
+        print("WARNING: --reload is incompatible with multiple workers; ignoring --reload")
+        reload = False
+    print(f"→ DropHound on http://{args.host}:{args.port}  (db: {settings.db_path}, workers: {workers})")
     uvicorn.run("drophound.web.app:app", host=args.host, port=args.port,
-                log_level="info", reload=args.reload)
+                log_level="info", reload=reload, workers=workers if not reload else None)
     return 0
 
 
@@ -414,6 +420,8 @@ def build_parser() -> argparse.ArgumentParser:
     svp.add_argument("--host", default="127.0.0.1")
     svp.add_argument("--port", type=int, default=8000)
     svp.add_argument("--reload", action="store_true")
+    svp.add_argument("--workers", type=int, default=None,
+                     help="worker processes (default: WEB_CONCURRENCY env var, else 1)")
     svp.set_defaults(func=cmd_serve)
 
     sub.add_parser("demo", help="init + seed + one cycle").set_defaults(func=cmd_demo)
