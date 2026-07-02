@@ -13,11 +13,13 @@ import asyncio
 import hmac
 import html
 import logging
+import os
 import re
 import sqlite3
 from contextlib import asynccontextmanager
 from datetime import timedelta
 
+import httpx
 from starlette.applications import Starlette
 from starlette.middleware import Middleware
 from starlette.middleware.cors import CORSMiddleware
@@ -1285,6 +1287,31 @@ async def delete_account(request: Request):
     return response
 
 
+# Render's free tier spins a web service down after ~15 min with no inbound
+# HTTP traffic. A GitHub Actions cron (`.github/workflows/keepalive.yml`) tries
+# to prevent that externally, but GitHub's schedule trigger is unreliable —
+# ticks are frequently dropped, leaving multi-hour gaps. RENDER_EXTERNAL_URL
+# is set automatically by Render on every deployed service, so self-pinging
+# our own public URL (not localhost — it must cross Render's router to count
+# as traffic) keeps the instance warm without depending on external cron.
+_SELF_PING_INTERVAL = 600  # seconds; well under Render's ~15 min idle timeout
+
+
+async def _self_ping_loop():
+    external_url = os.environ.get("RENDER_EXTERNAL_URL")
+    if not external_url:
+        return
+    url = external_url.rstrip("/") + "/api/health"
+    async with httpx.AsyncClient(timeout=20) as client:
+        while True:
+            await asyncio.sleep(_SELF_PING_INTERVAL)
+            try:
+                resp = await client.get(url)
+                logger.info("self-ping %s -> %s", url, resp.status_code)
+            except httpx.HTTPError as exc:
+                logger.warning("self-ping failed: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app):
     logging.basicConfig(
@@ -1303,8 +1330,16 @@ async def lifespan(app):
     finally:
         conn.close()
     logger.info("drophound started")
-    yield
-    logger.info("drophound shutdown")
+    ping_task = asyncio.create_task(_self_ping_loop())
+    try:
+        yield
+    finally:
+        ping_task.cancel()
+        try:
+            await ping_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("drophound shutdown")
 
 
 routes = [
