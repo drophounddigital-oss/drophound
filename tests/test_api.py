@@ -1,5 +1,7 @@
 from drophound import db
-from tests.conftest import csrf
+from tests.conftest import TEST_HOOK_SECRET, csrf
+
+HOOK_HEADERS = {"X-DropHound-Secret": TEST_HOOK_SECRET}
 
 
 def test_health(client):
@@ -65,7 +67,8 @@ def test_go_redirect_logs_click(client, conn):
 
 def test_hook_restock_known_sku(client, conn):
     before = db.one(conn, "SELECT COUNT(*) c FROM restock_events")["c"]
-    r = client.post("/hook/restock", json={"sku": "PM-LAB-MAC-01", "price": 13.99})
+    r = client.post("/hook/restock", json={"sku": "PM-LAB-MAC-01", "price": 13.99},
+                     headers=HOOK_HEADERS)
     assert r.status_code == 200
     body = r.json()
     assert body["status"] == "ok"
@@ -75,13 +78,14 @@ def test_hook_restock_known_sku(client, conn):
 
 
 def test_hook_restock_adhoc_name_only(client):
-    r = client.post("/hook/restock", json={"name": "Mystery Drop", "price": 20})
+    r = client.post("/hook/restock", json={"name": "Mystery Drop", "price": 20},
+                     headers=HOOK_HEADERS)
     assert r.status_code == 200
     assert r.json()["product"] == "Mystery Drop"
 
 
 def test_hook_restock_requires_name_or_sku(client):
-    assert client.post("/hook/restock", json={}).status_code == 400
+    assert client.post("/hook/restock", json={}, headers=HOOK_HEADERS).status_code == 400
 
 
 def test_hook_restock_secret_enforced(client, monkeypatch):
@@ -92,8 +96,32 @@ def test_hook_restock_secret_enforced(client, monkeypatch):
     assert ok.status_code == 200
 
 
+def test_hook_restock_rejected_when_secret_unset(client, monkeypatch):
+    monkeypatch.setenv("DROPHOUND_HOOK_SECRET", "")
+    r = client.post("/hook/restock", json={"name": "X"}, headers=HOOK_HEADERS)
+    assert r.status_code == 401
+
+
+def test_collection_value_api_requires_auth(client, conn):
+    sub = db.one(conn, "SELECT * FROM subscribers WHERE email='demo@drophound.app'")
+    r = client.get(f"/api/collection/{sub['id']}/value")
+    assert r.status_code == 401
+
+
+def test_collection_value_api_rejects_other_users(client, conn):
+    sub = db.one(conn, "SELECT * FROM subscribers WHERE email='demo@drophound.app'")
+    tok = csrf(client)
+    client.post("/register", data={"email": "other@example.com", "password": "password123",
+                                   "_csrf": tok})
+    r = client.get(f"/api/collection/{sub['id']}/value")
+    assert r.status_code == 403
+
+
 def test_collection_value_api(client, conn):
     sub = db.one(conn, "SELECT * FROM subscribers WHERE email='demo@drophound.app'")
+    sid = "test-demo-session"
+    db.execute(conn, "UPDATE subscribers SET session_id=? WHERE id=?", (sid, sub["id"]))
+    client.cookies.set("dh_sid", sid)
     r = client.get(f"/api/collection/{sub['id']}/value")
     assert r.status_code == 200
     body = r.json()

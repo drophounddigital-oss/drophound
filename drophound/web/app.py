@@ -569,8 +569,8 @@ async def go_redirect(request: Request):
 
 async def hook_restock(request: Request):
     settings = get_settings()
-    provided = request.headers.get("x-drophound-secret") or request.query_params.get("secret")
-    if settings.hook_secret and provided != settings.hook_secret:
+    provided = request.headers.get("x-drophound-secret") or request.query_params.get("secret") or ""
+    if not settings.hook_secret or not hmac.compare_digest(provided, settings.hook_secret):
         return JSONResponse({"error": "unauthorized"}, status_code=401)
 
     payload: dict = {}
@@ -701,16 +701,21 @@ async def api_products(request: Request):
 
 async def api_collection_value(request: Request):
     subscriber_id = int(request.path_params["subscriber_id"])
+    sid = get_session_id(request)
 
     def _work(conn):
-        sub = db.one(conn, "SELECT * FROM subscribers WHERE id = ?", (subscriber_id,))
+        sub = _user_by_sid(conn, sid)
         if not sub:
-            return None
-        return collection_summary(conn, subscriber_id)
+            return "unauthenticated", None
+        if sub["id"] != subscriber_id:
+            return "forbidden", None
+        return "ok", collection_summary(conn, subscriber_id)
 
-    result = await _in_db(_work)
-    if result is None:
-        return JSONResponse({"error": "unknown subscriber"}, status_code=404)
+    status, result = await _in_db(_work)
+    if status == "unauthenticated":
+        return JSONResponse({"error": "authentication required"}, status_code=401)
+    if status == "forbidden":
+        return JSONResponse({"error": "forbidden"}, status_code=403)
     return JSONResponse(result)
 
 

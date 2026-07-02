@@ -22,14 +22,20 @@ _NEUTRALIZE = (
     "TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID", "DISCORD_WEBHOOK_URL",
     "RESEND_API_KEY", "DROPHOUND_EMAIL_TO", "EBAY_APP_ID", "EBAY_CAMPAIGN_ID",
     "ANTHROPIC_API_KEY", "STRIPE_SECRET_KEY", "STRIPE_PRICE_ID",
-    "STRIPE_WEBHOOK_SECRET", "DROPHOUND_HOOK_SECRET",
+    "STRIPE_WEBHOOK_SECRET",
 )
+
+# /hook/restock requires a secret; give tests a fixed default so most of them
+# don't need to think about auth. Tests exercising the auth check itself
+# override this via monkeypatch.
+TEST_HOOK_SECRET = "test-hook-secret"
 
 
 @pytest.fixture
 def settings(tmp_path, monkeypatch):
     monkeypatch.setenv("DROPHOUND_DB_PATH", str(tmp_path / "test.db"))
     monkeypatch.setenv("DROPHOUND_BASE_URL", "http://testserver")
+    monkeypatch.setenv("DROPHOUND_HOOK_SECRET", TEST_HOOK_SECRET)
     for var in _NEUTRALIZE:
         monkeypatch.setenv(var, "")
     from drophound.config import get_settings
