@@ -33,8 +33,15 @@ def test_subscribe_rejects_bad_email(client, conn):
     assert db.one(conn, "SELECT * FROM subscribers WHERE email=?", ("not-an-email",)) is None
 
 
-def test_drops_page_and_api(client):
-    assert "Live drops" in client.get("/drops").text
+def test_drops_page_redirects_to_watch(client):
+    r = client.get("/drops", follow_redirects=False)
+    assert r.status_code == 301
+    assert r.headers["location"] == "/watch#activity"
+
+
+def test_watch_page_shows_activity_and_catalog(client):
+    text = client.get("/watch").text
+    assert "Live activity" in text and "Full catalog" in text
     data = client.get("/api/drops").json()
     assert isinstance(data["drops"], list) and len(data["drops"]) > 0
 
@@ -139,7 +146,7 @@ def test_catalog_search(client):
 
 
 def test_watch_page_renders(client):
-    assert "Pick what you watch" in client.get("/watch").text
+    assert "Browse drops & pick what you watch" in client.get("/watch").text
 
 
 def test_watch_add_list_remove(client, conn):

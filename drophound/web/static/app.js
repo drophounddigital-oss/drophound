@@ -56,10 +56,11 @@ document.addEventListener("click", async (e) => {
 });
 
 // --------------------------------------------------------------------------
-// Live-refresh public drops feed every 30s (timestamps only, no full reload)
+// Live-refresh the activity feed every 30s (timestamps only, no full reload).
+// Runs on any page that renders the feed (currently just /watch).
 // --------------------------------------------------------------------------
 (function pollDrops() {
-  if (!location.pathname.startsWith("/drops")) return;
+  if (!document.querySelector("[data-age-id]")) return;
   const tick = async () => {
     try {
       const res = await fetch("/api/drops?limit=50", { headers: { Accept: "application/json" } });

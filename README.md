@@ -35,7 +35,7 @@ pytest                            # run the test suite
 
 | Layer | What it is | Where it lives |
 |------|-------------|----------------|
-| **1 · Free funnel** | Public landing + live drops feed + broadcast alerts (Telegram / Discord / email) | `web/` landing & `/drops`, `engine/alerts.py` |
+| **1 · Free funnel** | Public landing + live drops feed/catalog + broadcast alerts (Telegram / Discord / email) | `web/` landing & `/watch`, `engine/alerts.py` |
 | **2 · Premium ($8/mo)** | Filtered alerts, eBay resale tracking, collection P/L, restock predictions | `/app`, `/collection`, `filters.py`, `patterns.py`, `engine/resale.py` |
 | **3 · Affiliate / margin** | Every buy/resale link routes through affiliate tags; sponsorship slots in the digest | `affiliates.py`, `/go/{id}` redirect |
 
@@ -161,7 +161,7 @@ drophound/
       pipeline.py    run_cycle(): observe→record→refresh→alert→log
     web/
       app.py         Starlette routes + JSON API
-      templates/     landing, drops, dashboard, collection, pricing, digest
+      templates/     landing, watch, dashboard, collection, pricing, digest
       static/        styles.css, app.js
     fixtures/        catalog.json, ebay_sold.json
     cli.py           command line (incl. add-product, test-alert, run --source)

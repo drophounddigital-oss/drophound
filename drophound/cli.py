@@ -301,7 +301,7 @@ def cmd_test_alert(args, settings) -> int:
         title="DropHound test alert",
         text=("🐾 DropHound is connected! This is a test alert — real drop "
               "alerts will look like this, the moment something restocks."),
-        url=f"{settings.base_url}/drops",
+        url=f"{settings.base_url}/watch",
     )
     any_live = False
     for d in broadcast_dispatchers(settings):

@@ -1,13 +1,13 @@
 {% extends "base.html" %}
-{% block title %}Browse & watch 1,500+ blind-box drops | DropHound{% endblock %}
-{% block description %}Search every tracked blind box: Labubu, Skullpanda, Smiski and more. Pick exactly which restocks you want alerts for.{% endblock %}
+{% block title %}Live drops & full catalog | DropHound{% endblock %}
+{% block description %}See every live restock, drop and price move, then search the full blind-box catalog and star exactly what you want alerts for.{% endblock %}
 {% block content %}
 
 <div class="page-head">
   <div>
-    <h1>Pick what you watch</h1>
-    <p class="muted">{{ site.tracked }} products across every tracked store. Star the ones you
-      care about and only get alerts for those.</p>
+    <h1>Browse drops & pick what you watch</h1>
+    <p class="muted">{{ site.tracked }} products across every tracked store. See what's live
+      right now, then star the ones you want alerts for.</p>
   </div>
   {% if site.current_user %}
   <div class="watch-count-badge" data-tip="Products you're watching">
@@ -29,6 +29,41 @@
 </div>
 {% endif %}
 
+<section id="activity">
+  <h2 class="section-title">Live activity</h2>
+  {% if events %}
+  <div class="feed-list">
+    {% for d in events %}
+    <article class="drop-row card compact">
+      <span class="thumb" style="background:{{ d.color }}">{{ d.initials }}</span>
+      <div class="drop-main">
+        <div class="drop-title-row">
+          <span class="badge {{ d.badge_class }}">{{ d.badge }}</span>
+          <h3>{{ d.name }}</h3>
+          <span class="trail-time" data-age-id="{{ d.id }}">{{ d.age }}</span>
+        </div>
+        <p class="muted">{{ d.brand }} · {{ d.character }} · {{ d.retailer }} ({{ d.region }})</p>
+      </div>
+      <div class="drop-prices">
+        {% if d.resale_low and d.resale_high %}
+        <div class="price-now">${{ d.resale_low | round(0) | int }} – ${{ d.resale_high | round(0) | int }}<span>on eBay</span></div>
+        {% else %}
+        <div class="price-now">{{ d.price | money }}<span>retail</span></div>
+        {% endif %}
+        <div class="price-resale">{{ d.resale_median | money }}<span>resale{% if d.multiple %} · {{ d.multiple }}x{% endif %}</span></div>
+      </div>
+      <div class="drop-actions">
+        <a class="btn btn-sm" href="/go/{{ d.product_id }}?to={{ d.buy_target }}" rel="nofollow" target="_blank">Buy</a>
+      </div>
+    </article>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="empty card">No activity recorded yet. Run <code>python -m drophound demo</code> to populate the feed.</p>
+  {% endif %}
+</section>
+
+<h2 class="section-title">Full catalog</h2>
 <div class="card watch-bar">
   <div class="search-row">
     <input type="text" id="catalog-search" placeholder="Search Labubu, Skullpanda, blind box…" />

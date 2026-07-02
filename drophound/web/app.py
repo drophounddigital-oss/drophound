@@ -1,7 +1,8 @@
 """DropHound web application (Starlette).
 
 Serves the three product layers:
-  Layer 1  /            landing + email capture, /drops public feed
+  Layer 1  /            landing + email capture
+  Layer 1  /watch       live activity feed + full product catalog/watchlist
   Layer 2  /app         premium dashboard, /collection P/L tracker, /pricing
   Layer 3  /go/{id}     affiliate redirect (logs the click)
 Plus a small JSON API under /api and the AI digest at /digest.
@@ -344,19 +345,10 @@ async def subscribe(request: Request):
 
 
 async def drops_page(request: Request):
-    sid = get_session_id(request)
-
-    def _work(conn):
-        now = now_utc()
-        rows = recent_event_rows(conn, limit=50)
-        events = [event_view(conn, r, now) for r in rows]
-        site = site_context(conn)
-        site["current_user"] = _user_by_sid(conn, sid)
-        return events, site
-
-    events, site = await _in_db(_work)
-    site["csrf_token"] = _csrf(request)
-    return templates.TemplateResponse(request, "drops.html", {"events": events, "site": site})
+    # The standalone live-feed page was folded into /watch (one page for
+    # "what's happening" + "what to watch" instead of two easily-confused
+    # nav items). Keep the old URL alive for bookmarks/links/SEO.
+    return RedirectResponse("/watch#activity", status_code=301)
 
 
 async def dashboard(request: Request):
@@ -660,8 +652,7 @@ async def robots_txt(request: Request):
 async def sitemap_xml(request: Request):
     base = get_settings().base_url.rstrip("/")
     pages = [("/", "hourly", "1.0"), ("/watch", "hourly", "0.9"),
-             ("/drops", "hourly", "0.8"), ("/pricing", "weekly", "0.6"),
-             ("/digest", "daily", "0.5")]
+             ("/pricing", "weekly", "0.6"), ("/digest", "daily", "0.5")]
     urls = "".join(
         f"<url><loc>{base}{p}</loc><changefreq>{cf}</changefreq>"
         f"<priority>{pr}</priority></url>"
@@ -973,14 +964,17 @@ async def watch_page(request: Request):
     sid = get_session_id(request)
 
     def _work(conn):
+        now = now_utc()
+        rows = recent_event_rows(conn, limit=12)
+        events = [event_view(conn, r, now) for r in rows]
         site = site_context(conn)
         site["current_user"] = _user_by_sid(conn, sid)
-        return site
+        return events, site
 
-    site = await _in_db(_work)
+    events, site = await _in_db(_work)
     site["csrf_token"] = _csrf(request)
     return templates.TemplateResponse(request, "watch.html",
-                                      {"site": site, "popular": POPULAR_CHARACTERS})
+                                      {"site": site, "popular": POPULAR_CHARACTERS, "events": events})
 
 
 async def api_catalog(request: Request):
