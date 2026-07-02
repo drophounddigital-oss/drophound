@@ -166,6 +166,10 @@ def init_db(conn: sqlite3.Connection) -> None:
     _ensure_column(conn, "subscribers", "stripe_customer_id", "TEXT")
     _ensure_column(conn, "subscribers", "session_id", "TEXT")
     _ensure_column(conn, "subscribers", "password_hash", "TEXT")
+    # url_ok: NULL = not yet checked, 1 = confirmed a real single-product page,
+    # 0 = confirmed dead/redirected away (drives the Buy-link eBay fallback).
+    _ensure_column(conn, "products", "url_ok", "INTEGER")
+    _ensure_column(conn, "products", "url_checked_at", "TEXT")
     conn.commit()
 
 

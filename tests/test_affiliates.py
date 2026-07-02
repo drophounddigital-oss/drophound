@@ -1,85 +1,94 @@
 from drophound.affiliates import build_url
 from drophound.config import get_settings
 
-POPMART_US = {
+POPMART_CONFIRMED_OK = {
     "brand": "Pop Mart",
     "name": "Labubu Exciting Macaron Blind Box",
     "character": "Labubu",
     "retailer": "Pop Mart US",
     "product_url": "https://www.popmart.com/us/products/labubu-exciting-macaron",
+    "url_ok": 1,
 }
 
-POPMART_EU = {
+POPMART_NEVER_CHECKED = {
     "brand": "Pop Mart",
     "name": "Labubu Let's Checkmate Blind Box",
     "character": "Labubu",
     "retailer": "Pop Mart EU",
     "product_url": "https://www.popmart.com/de/products/labubu-lets-checkmate",
+    "url_ok": None,
 }
 
-POPMART_UK = {
+POPMART_CONFIRMED_DEAD = {
     "brand": "Pop Mart",
     "name": "Skullpanda Image of Reality Blind Box",
     "character": "Skullpanda",
     "retailer": "Pop Mart UK",
     "product_url": "https://www.popmart.com/uk/products/skullpanda-image-of-reality",
+    "url_ok": 0,
 }
 
-SMISKI = {
+SMISKI_CONFIRMED_DEAD = {
     "brand": "Smiski",
     "name": "Smiski Living Series",
     "character": "Smiski",
     "retailer": "Smiski US",
-    "product_url": "https://www.amazon.com/s?k=Smiski+Living+Series",
+    "product_url": "https://www.smiski.com/products/living-series",
+    "url_ok": 0,
 }
 
-SONNY_ANGEL = {
+SONNY_ANGEL_CONFIRMED_OK = {
     "brand": "Sonny Angel",
     "name": "Sonny Angel Hippers Blind Box",
     "character": "Sonny Angel",
     "retailer": "Sonny Angel US",
-    "product_url": "https://www.amazon.com/s?k=Sonny+Angel+Hippers",
+    "product_url": "https://www.sonnyangel-store.com/products/hippers",
+    "url_ok": 1,
 }
 
 
-# --- Pop Mart: routes to eBay (own site slugs throw strconv errors) --------
+# --- site target: direct link when not confirmed dead ----------------------
 
-def test_popmart_site_routes_to_ebay():
+def test_confirmed_ok_url_goes_direct_to_retailer():
     settings = get_settings()
-    url = build_url(settings, POPMART_US, "site")
+    url = build_url(settings, POPMART_CONFIRMED_OK, "site")
+    assert url == POPMART_CONFIRMED_OK["product_url"]
+
+
+def test_never_checked_url_is_tried_directly():
+    settings = get_settings()
+    url = build_url(settings, POPMART_NEVER_CHECKED, "site")
+    assert url == POPMART_NEVER_CHECKED["product_url"]
+
+
+def test_confirmed_ok_applies_regardless_of_brand():
+    settings = get_settings()
+    url = build_url(settings, SONNY_ANGEL_CONFIRMED_OK, "site")
+    assert url == SONNY_ANGEL_CONFIRMED_OK["product_url"]
+
+
+# --- site target: eBay fallback only once confirmed dead --------------------
+
+def test_confirmed_dead_url_falls_back_to_ebay():
+    settings = get_settings()
+    url = build_url(settings, POPMART_CONFIRMED_DEAD, "site")
     assert url.startswith("https://www.ebay.com/sch/")
-    assert "Pop+Mart" in url
-    assert "Labubu" in url
+    assert "Skullpanda" in url
 
 
-def test_popmart_eu_also_routes_to_ebay():
+def test_confirmed_dead_smiski_falls_back_to_ebay_not_amazon():
     settings = get_settings()
-    url = build_url(settings, POPMART_EU, "site")
+    url = build_url(settings, SMISKI_CONFIRMED_DEAD, "site")
     assert url.startswith("https://www.ebay.com/sch/")
+    assert "amazon" not in url.lower()
 
 
-def test_popmart_uk_also_routes_to_ebay():
+def test_missing_product_url_falls_back_to_ebay():
     settings = get_settings()
-    url = build_url(settings, POPMART_UK, "site")
+    product = {"brand": "Smiski", "name": "Smiski Bath Series", "character": "Smiski",
+               "product_url": None, "url_ok": None}
+    url = build_url(settings, product, "site")
     assert url.startswith("https://www.ebay.com/sch/")
-
-
-# --- Smiski / Sonny Angel: always Amazon search from product name ----------
-# (Stored URLs may point to dead domains from old seed data; name-based
-#  Amazon search is reliable regardless of what's in the DB.)
-
-def test_smiski_uses_amazon_search():
-    settings = get_settings()
-    url = build_url(settings, SMISKI, "site")
-    assert url.startswith("https://www.amazon.com/s?")
-    assert "Smiski" in url
-
-
-def test_sonny_angel_uses_amazon_search():
-    settings = get_settings()
-    url = build_url(settings, SONNY_ANGEL, "site")
-    assert url.startswith("https://www.amazon.com/s?")
-    assert "Sonny+Angel" in url
 
 
 # --- eBay target ----------------------------------------------------------
@@ -87,7 +96,7 @@ def test_sonny_angel_uses_amazon_search():
 def test_ebay_search_url_without_campaign(monkeypatch):
     monkeypatch.delenv("EBAY_CAMPAIGN_ID", raising=False)
     settings = get_settings()
-    url = build_url(settings, POPMART_US, "ebay")
+    url = build_url(settings, POPMART_CONFIRMED_OK, "ebay")
     assert url.startswith("https://www.ebay.com/sch/")
     assert "Labubu" in url
     assert "campid" not in url
@@ -96,7 +105,7 @@ def test_ebay_search_url_without_campaign(monkeypatch):
 def test_ebay_url_includes_campaign_when_set(monkeypatch):
     monkeypatch.setenv("EBAY_CAMPAIGN_ID", "5338999999")
     settings = get_settings()
-    url = build_url(settings, POPMART_US, "ebay")
+    url = build_url(settings, POPMART_CONFIRMED_OK, "ebay")
     assert "campid=5338999999" in url
 
 
@@ -104,5 +113,5 @@ def test_ebay_url_includes_campaign_when_set(monkeypatch):
 
 def test_stockx_target_is_search():
     settings = get_settings()
-    url = build_url(settings, POPMART_US, "stockx")
+    url = build_url(settings, POPMART_CONFIRMED_OK, "stockx")
     assert url.startswith("https://stockx.com/search")

@@ -149,6 +149,13 @@ def cmd_refresh_prices(args, settings) -> int:
           + ("  (dry run — DB not modified)" if dry else ""))
     if skipped:
         print("  Tip: Pop Mart prices use client-side JS — update manually in fixtures/catalog.json")
+    dead_links = [r["name"] for r in results if r.get("url_ok") is False]
+    if dead_links:
+        print(f"\n⚠ {len(dead_links)} Buy link(s) confirmed dead — will fall back to eBay search:")
+        for name in dead_links[:20]:
+            print(f"  ✗ {name}")
+        if len(dead_links) > 20:
+            print(f"  … and {len(dead_links) - 20} more")
     return 0
 
 

@@ -4,7 +4,7 @@ Outbound clicks route through `/go/{product_id}?to=<target>`, which appends the
 configured affiliate tags and logs the click.
 
 Targets:
-  site    → product's own retailer page (stored product_url), character search fallback
+  site    → product's own retailer page (stored product_url), eBay search fallback
   ebay    → eBay sold/active search (resale discovery)
   stockx  → StockX search (resale discovery)
 """
@@ -12,7 +12,7 @@ Targets:
 from __future__ import annotations
 
 from typing import Any
-from urllib.parse import quote, quote_plus, urlencode, urlparse, urlunparse, parse_qsl
+from urllib.parse import quote_plus, urlencode, urlparse, urlunparse, parse_qsl
 
 from .config import Settings
 
@@ -31,31 +31,13 @@ def _add_params(url: str, params: dict[str, str]) -> str:
     return urlunparse(parsed._replace(query=urlencode(query)))
 
 
-def _retailer_search_url(product: Any) -> str:
-    """Brand-aware search fallback using character name (not full product name)."""
-    brand = (_field(product, "brand") or "").lower()
-    retailer = (_field(product, "retailer") or "").lower()
-    # Character name is short and specific; full product name returns 100+ results.
-    character = _field(product, "character") or _field(product, "name") or "blind box"
-
-    if "pop mart" in brand or "popmart" in brand:
-        if "uk" in retailer:
-            locale = "uk"
-        elif "eu" in retailer or "de" in retailer:
-            locale = "de"
-        else:
-            locale = "us"
-        return f"https://www.popmart.com/{locale}/search/{quote(character, safe='')}"
-
-    if "smiski" in brand:
-        return f"https://www.smiski.com/search?q={quote_plus(character)}"
-
-    if "sonny angel" in brand or "sonnyangel" in brand:
-        return f"https://www.sonnyangel-store.com/search?q={quote_plus(character)}"
-
-    name = _field(product, "name") or character
-    search_term = ((_field(product, "brand") or "") + " " + name).strip()
-    return f"https://www.google.com/search?q={quote_plus('buy ' + search_term)}"
+def _ebay_search_url(settings: Settings, product: Any) -> str:
+    name = _field(product, "name") or _field(product, "character") or "blind box"
+    brand = _field(product, "brand") or ""
+    url = f"https://www.ebay.com/sch/i.html?_nkw={quote_plus((brand + ' ' + name).strip())}"
+    if settings.ebay_campaign_id:
+        url = _add_params(url, {"mkcid": "1", "campid": settings.ebay_campaign_id})
+    return url
 
 
 def build_url(settings: Settings, product: Any, target: str) -> str:
@@ -64,40 +46,20 @@ def build_url(settings: Settings, product: Any, target: str) -> str:
     target ∈ {site, ebay, stockx}.
 
     'site' (default) sends the user to the product's own retailer page via the
-    stored product_url. If no URL is stored, falls back to a character-name search
-    on the appropriate retailer site.
+    stored product_url — but only once `url_ok` confirms that page still
+    resolves to a real single product (see engine/price_fetch.check_url_ok,
+    run on a background refresh cycle). A product that's never been checked
+    yet (url_ok is NULL) is tried directly; one confirmed dead (url_ok = 0)
+    falls back to an eBay search so the click never dead-ends for the user.
     """
     target = (target or "site").lower()
 
     if target in ("site", "popmart", "smiski", "sonnyangel"):
-        brand = (_field(product, "brand") or "").lower()
-        retailer = (_field(product, "retailer") or "").lower()
-
-        # Pop Mart: route to eBay search. Their own product slugs are internal
-        # IDs that throw client-side errors, and their search returns their own
-        # catalog only. eBay has broad reseller listings for every Pop Mart SKU.
-        if "pop mart" in brand or "popmart" in brand:
-            name = _field(product, "name") or _field(product, "character") or "blind box"
-            url = f"https://www.ebay.com/sch/i.html?_nkw={quote_plus(('Pop Mart ' + name).strip())}"
-            if settings.ebay_campaign_id:
-                url = _add_params(url, {"mkcid": "1", "campid": settings.ebay_campaign_id})
-            return url
-
-        # Smiski / Sonny Angel: always build an Amazon search URL from the
-        # product name. Stored URLs may point to dead domains (old seed data).
-        if "smiski" in brand:
-            name = _field(product, "name") or _field(product, "character") or "Smiski"
-            return f"https://www.amazon.com/s?k={quote_plus(name)}"
-
-        if "sonny angel" in brand or "sonnyangel" in brand:
-            name = _field(product, "name") or _field(product, "character") or "Sonny Angel"
-            return f"https://www.amazon.com/s?k={quote_plus(name)}"
-
-        # All other brands: use the stored product URL.
         url = (_field(product, "product_url") or "").strip()
-        if url and url.startswith("http"):
+        confirmed_dead = _field(product, "url_ok") == 0
+        if url and url.startswith("http") and not confirmed_dead:
             return url
-        return _retailer_search_url(product)
+        return _ebay_search_url(settings, product)
 
     if target == "stockx":
         name = _field(product, "name") or _field(product, "character") or "blind box"
@@ -108,12 +70,7 @@ def build_url(settings: Settings, product: Any, target: str) -> str:
         return url
 
     # Default: eBay search (resale).
-    name = _field(product, "name") or _field(product, "character") or "blind box"
-    brand = _field(product, "brand") or ""
-    url = f"https://www.ebay.com/sch/i.html?_nkw={quote_plus((brand + ' ' + name).strip())}"
-    if settings.ebay_campaign_id:
-        url = _add_params(url, {"mkcid": "1", "campid": settings.ebay_campaign_id})
-    return url
+    return _ebay_search_url(settings, product)
 
 
 TARGETS = ("site", "ebay", "stockx")
