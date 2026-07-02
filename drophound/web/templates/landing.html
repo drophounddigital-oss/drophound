@@ -10,7 +10,7 @@
 
 <section class="hero">
   <div class="hero-copy">
-    <span class="pill">● Live: {{ site.alerts_24h }} alerts in the last 24h</span>
+    <span class="pill">Live: {{ site.alerts_24h }} alerts in the last 24h</span>
     <h1>Never miss a drop again.</h1>
     <p class="lede">
       Real-time restock alerts and resale intelligence for blind-box collectors.
@@ -32,19 +32,17 @@
   </div>
 
   <aside class="hero-feed card">
-    <div class="card-head">
-      <h3>Latest drops</h3><a class="link" href="/drops">See all →</a>
+    <div class="trail-head">
+      <h3>Latest drops</h3><a class="link" href="/drops">See all</a>
     </div>
     {% if drops %}
-    <ul class="feed mini">
+    <ul class="trail">
       {% for d in drops %}
       <li>
-        <span class="thumb" style="background:{{ d.color }}">{{ d.initials }}</span>
-        <span class="feed-main">
-          <span class="feed-title">{{ d.name }}</span>
-          <span class="feed-sub">{{ d.retailer }} · {{ d.region }} · {{ d.age }}</span>
-        </span>
-        <span class="badge {{ d.badge_class }}">{{ d.badge }}</span>
+        <span class="trail-time">{{ d.age }}</span>
+        <span class="trail-tag tag-{{ d.badge_class[2:] }}">{{ d.badge }}</span>
+        <span class="trail-name">{{ d.name }}</span>
+        <span class="trail-meta">{{ d.retailer }} · {{ d.region }}</span>
       </li>
       {% endfor %}
     </ul>
@@ -56,23 +54,29 @@
 
 <section class="layers">
   <h2 class="section-title">Three layers, one machine</h2>
-  <div class="grid-3">
-    <div class="card layer">
-      <span class="layer-tag">Free</span>
-      <h3>Instant alerts</h3>
-      <p>Public Telegram, Discord and email the moment a watched product drops, restocks, or sees a price move. Fast, useful, free. This is the funnel.</p>
-    </div>
-    <div class="card layer">
-      <span class="layer-tag tag-pro">Premium · ${{ '%.0f'|format(site.premium_price) }}/mo</span>
-      <h3>Resale intelligence</h3>
-      <p>Filter by character, region and price ceiling. eBay sold-listing resale tracking, a collection P/L tracker, and likely-restock windows from historical cadence.</p>
-    </div>
-    <div class="card layer">
-      <span class="layer-tag tag-aff">Affiliate</span>
-      <h3>Built-in margin</h3>
-      <p>Every buy and resale link routes through affiliate programs. Traffic monetizes whether or not someone subscribes, plus brand sponsorships in the digest.</p>
-    </div>
-  </div>
+  <ul class="ledger">
+    <li class="ledger-row">
+      <span class="ledger-tag">Free</span>
+      <div class="ledger-body">
+        <h3>Instant alerts</h3>
+        <p>Public Telegram, Discord and email the moment a watched product drops, restocks, or sees a price move. Fast, useful, free. This is the funnel.</p>
+      </div>
+    </li>
+    <li class="ledger-row">
+      <span class="ledger-tag tag-pro">Premium · ${{ '%.0f'|format(site.premium_price) }}/mo</span>
+      <div class="ledger-body">
+        <h3>Resale intelligence</h3>
+        <p>Filter by character, region and price ceiling. eBay sold-listing resale tracking, a collection P/L tracker, and likely-restock windows from historical cadence.</p>
+      </div>
+    </li>
+    <li class="ledger-row">
+      <span class="ledger-tag tag-aff">Affiliate</span>
+      <div class="ledger-body">
+        <h3>Built-in margin</h3>
+        <p>Every buy and resale link routes through affiliate programs. Traffic monetizes whether or not someone subscribes, plus brand sponsorships in the digest.</p>
+      </div>
+    </li>
+  </ul>
 </section>
 
 <section class="cta card cta-card">
@@ -80,7 +84,7 @@
     <h2>Want it faster, and filtered to only your characters?</h2>
     <p>Premium gets sub-minute alerts, resale tracking, and your collection's live value.</p>
   </div>
-  <a class="btn" href="/pricing">See Premium →</a>
+  <a class="btn" href="/pricing">See Premium</a>
 </section>
 
 {% endblock %}

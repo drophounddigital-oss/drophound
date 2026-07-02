@@ -779,7 +779,8 @@ async def register_page(request: Request):
             site = await _in_db(_ctx_err)
             site["csrf_token"] = _csrf(request)
             return templates.TemplateResponse(request, "login.html",
-                {"site": site, "error": str(exc), "tab": "register"}, status_code=400)
+                {"site": site, "error": str(exc), "tab": "register",
+                 "posted_email": form.get("email") or ""}, status_code=400)
         try:
             password = validate_password(form.get("password") or "")
         except ValueError as exc:
@@ -790,7 +791,8 @@ async def register_page(request: Request):
             site = await _in_db(_ctx_err2)
             site["csrf_token"] = _csrf(request)
             return templates.TemplateResponse(request, "login.html",
-                {"site": site, "error": str(exc), "tab": "register"}, status_code=400)
+                {"site": site, "error": str(exc), "tab": "register",
+                 "posted_email": email}, status_code=400)
 
         # hash_password is scrypt (CPU-intensive) — runs inside the thread
         def _register_work(conn):
@@ -822,7 +824,7 @@ async def register_page(request: Request):
             return templates.TemplateResponse(request, "login.html",
                 {"site": site,
                  "error": "An account with that email already exists. Log in instead.",
-                 "tab": "register"}, status_code=400)
+                 "tab": "register", "posted_email": email}, status_code=400)
 
         firebase_db.upsert_user(email, {"email": email, "tier": "free",
                                         "created_at": now_utc().isoformat()})
@@ -858,7 +860,8 @@ async def login_page(request: Request):
             site = await _in_db(_ctx_csrf)
             site["csrf_token"] = _csrf(request)
             return templates.TemplateResponse(request, "login.html",
-                {"site": site, "error": "Session expired. Please try again.", "tab": "login"},
+                {"site": site, "error": "Session expired. Please try again.", "tab": "login",
+                 "posted_email": form.get("email") or ""},
                 status_code=403)
         try:
             email = validate_email(form.get("email") or "")
@@ -870,7 +873,8 @@ async def login_page(request: Request):
             site = await _in_db(_ctx_email)
             site["csrf_token"] = _csrf(request)
             return templates.TemplateResponse(request, "login.html",
-                {"site": site, "error": str(exc), "tab": "login"}, status_code=400)
+                {"site": site, "error": str(exc), "tab": "login",
+                 "posted_email": form.get("email") or ""}, status_code=400)
 
         if is_locked(email):
             firebase_db.log_event(email, "login_blocked", ip=_client_ip(request))
@@ -883,7 +887,7 @@ async def login_page(request: Request):
             return templates.TemplateResponse(request, "login.html",
                 {"site": site,
                  "error": "Too many failed attempts. Try again in 15 minutes.",
-                 "tab": "login"}, status_code=429)
+                 "tab": "login", "posted_email": email}, status_code=429)
 
         password = form.get("password") or ""
 
@@ -908,7 +912,8 @@ async def login_page(request: Request):
             site["current_user"] = None
             site["csrf_token"] = _csrf(request)
             return templates.TemplateResponse(request, "login.html",
-                {"site": site, "error": "Incorrect email or password.", "tab": "login"},
+                {"site": site, "error": "Incorrect email or password.", "tab": "login",
+                 "posted_email": email},
                 status_code=400)
 
         _, site, sub = outcome

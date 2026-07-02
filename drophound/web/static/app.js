@@ -93,19 +93,36 @@ function showCatalogSkeleton(container, count = 12) {
 // --------------------------------------------------------------------------
 // Optimistic watch-button rendering (session-based — no email param needed)
 // --------------------------------------------------------------------------
+const PENDING_WATCH_KEY = "dh_pending_watch";
+
+async function toggleWatch(pid, isOn) {
+  const endpoint = isOn ? "/watch/remove" : "/watch/add";
+  const body = new URLSearchParams({ product_id: pid, _csrf: getCsrfToken() });
+  const res = await fetch(endpoint, { method: "POST", body });
+  if (res.status === 401) {
+    const err = new Error("unauthorized");
+    err.status = 401;
+    throw err;
+  }
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 document.addEventListener("click", async (e) => {
   const btn = e.target.closest(".watch-btn");
   if (!btn) return;
 
-  // Not logged in: send to login page
+  // Not logged in: remember which product they meant to watch, then send to login.
+  // On return to /watch (post-login), initCatalog() applies this automatically —
+  // no need to hunt the item down and click it again.
   if (btn.dataset.loggedIn !== "true") {
+    localStorage.setItem(PENDING_WATCH_KEY, btn.dataset.pid);
     location.href = "/login?next=/watch";
     return;
   }
 
   const pid = btn.dataset.pid;
   const isOn = btn.classList.contains("on");
-  const endpoint = isOn ? "/watch/remove" : "/watch/add";
 
   // --- Optimistic update: flip immediately ---
   btn.classList.add("optimistic");
@@ -118,14 +135,15 @@ document.addEventListener("click", async (e) => {
 
   // --- Send to server (session cookie is sent automatically) ---
   try {
-    const body = new URLSearchParams({ product_id: pid, _csrf: getCsrfToken() });
-    const res = await fetch(endpoint, { method: "POST", body });
-    if (res.status === 401) { location.href = "/login?next=/watch"; return; }
-    if (!res.ok) throw new Error(await res.text());
-    const data = await res.json();
+    const data = await toggleWatch(pid, isOn);
     btn.classList.toggle("on", data.watched);
     if (counterEl) counterEl.textContent = data.count;
   } catch (err) {
+    if (err.status === 401) {
+      localStorage.setItem(PENDING_WATCH_KEY, pid);
+      location.href = "/login?next=/watch";
+      return;
+    }
     // Revert on failure
     btn.classList.toggle("on", isOn);
     if (counterEl) {
@@ -248,5 +266,26 @@ document.addEventListener("click", async (e) => {
 
   grid.addEventListener("dh:reload", () => load(1));
 
-  load(1);
+  // If the user picked a product to watch while logged out and was sent to
+  // log in, apply that watch now instead of making them find and click it
+  // again. Works even if the item isn't on the current page.
+  async function applyPendingWatch() {
+    const pid = localStorage.getItem(PENDING_WATCH_KEY);
+    if (!pid || !loggedIn) return;
+    localStorage.removeItem(PENDING_WATCH_KEY);
+    try {
+      const data = await toggleWatch(pid, false);
+      const wc = document.querySelector(".watch-count");
+      if (wc && data.count != null) wc.textContent = data.count;
+      const btn = grid.querySelector(`.watch-btn[data-pid="${pid}"]`);
+      if (btn && data.watched) {
+        btn.classList.add("on");
+        btn.textContent = "Watching";
+      }
+    } catch (err) {
+      console.warn("pending watch failed:", err);
+    }
+  }
+
+  load(1).then(applyPendingWatch);
 })();

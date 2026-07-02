@@ -2,12 +2,15 @@
 {% block title %}{% if tab == "register" %}Create your free account{% else %}Log in{% endif %} | DropHound{% endblock %}
 {% block content %}
 
+{% set next_param = request.query_params.get('next', '') %}
+{% set next_qs = ('?next=' ~ (next_param | urlencode)) if next_param else '' %}
+
 <div class="auth-wrap">
   <div class="auth-card card">
 
     <div class="auth-tabs">
-      <a class="auth-tab {% if tab != 'register' %}active{% endif %}" href="/login">Log in</a>
-      <a class="auth-tab {% if tab == 'register' %}active{% endif %}" href="/register">Sign up</a>
+      <a class="auth-tab {% if tab != 'register' %}active{% endif %}" href="/login{{ next_qs }}">Log in</a>
+      <a class="auth-tab {% if tab == 'register' %}active{% endif %}" href="/register{{ next_qs }}">Sign up</a>
     </div>
 
     {% if error %}
@@ -15,7 +18,7 @@
     {% endif %}
 
     {% if tab == "register" %}
-    <form action="/register" method="post" class="auth-form" novalidate>
+    <form action="/register{{ next_qs }}" method="post" class="auth-form" novalidate>
       <input type="hidden" name="_csrf" value="{{ site.csrf_token }}" />
       <!-- honeypot: must stay empty; bots fill all fields -->
       <div style="display:none" aria-hidden="true">
@@ -29,7 +32,7 @@
       <label class="field-label" for="r-email">Email</label>
       <input id="r-email" type="email" name="email" placeholder="you@email.com"
              autocomplete="email" required autofocus
-             value="{{ request.query_params.get('email', '') }}" />
+             value="{{ posted_email if posted_email is defined else request.query_params.get('email', '') }}" />
 
       <label class="field-label" for="r-pw">Password <span class="muted">(min 8 chars)</span></label>
       <input id="r-pw" type="password" name="password" placeholder="••••••••"
@@ -39,11 +42,11 @@
 
       <p class="auth-switch micro">By signing up you agree to our
         <a href="/terms">Terms</a> and <a href="/privacy">Privacy Policy</a>.</p>
-      <p class="auth-switch">Already have an account? <a href="/login">Log in →</a></p>
+      <p class="auth-switch">Already have an account? <a href="/login{{ next_qs }}">Log in</a></p>
     </form>
 
     {% else %}
-    <form action="/login" method="post" class="auth-form" novalidate>
+    <form action="/login{{ next_qs }}" method="post" class="auth-form" novalidate>
       <input type="hidden" name="_csrf" value="{{ site.csrf_token }}" />
 
       <h1 class="auth-title">Welcome back</h1>
@@ -51,7 +54,8 @@
 
       <label class="field-label" for="l-email">Email</label>
       <input id="l-email" type="email" name="email" placeholder="you@email.com"
-             autocomplete="email" required autofocus />
+             autocomplete="email" required autofocus
+             value="{{ posted_email if posted_email is defined else '' }}" />
 
       <label class="field-label" for="l-pw">Password</label>
       <input id="l-pw" type="password" name="password" placeholder="••••••••"
@@ -59,7 +63,7 @@
 
       <button class="btn full-width" type="submit">Log in</button>
 
-      <p class="auth-switch">No account yet? <a href="/register">Sign up free →</a></p>
+      <p class="auth-switch">No account yet? <a href="/register{{ next_qs }}">Sign up free</a></p>
     </form>
     {% endif %}
 

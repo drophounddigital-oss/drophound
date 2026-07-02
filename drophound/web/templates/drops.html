@@ -9,9 +9,9 @@
     <p class="muted">Every restock, drop and price move across tracked retailers. {{ site.tracked }} products watched.</p>
   </div>
   {% if site.current_user %}
-  <a class="btn btn-ghost" href="/watch">Manage your watchlist →</a>
+  <a class="btn btn-ghost" href="/watch">Manage your watchlist</a>
   {% else %}
-  <a class="btn btn-ghost" href="/register">Get these as alerts →</a>
+  <a class="btn btn-ghost" href="/register">Get these as alerts</a>
   {% endif %}
 </div>
 
@@ -24,8 +24,9 @@
       <div class="drop-title-row">
         <span class="badge {{ d.badge_class }}">{{ d.badge }}</span>
         <h3>{{ d.name }}</h3>
+        <span class="trail-time" data-age-id="{{ d.id }}">{{ d.age }}</span>
       </div>
-      <p class="muted">{{ d.brand }} · {{ d.character }} · {{ d.retailer }} ({{ d.region }}) · {{ d.age }}</p>
+      <p class="muted">{{ d.brand }} · {{ d.character }} · {{ d.retailer }} ({{ d.region }})</p>
     </div>
     <div class="drop-prices">
       {% if d.resale_low and d.resale_high %}
